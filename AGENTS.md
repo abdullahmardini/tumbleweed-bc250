@@ -5,7 +5,7 @@
 - Home user, one board: AMD BC-250 on openSUSE Tumbleweed.
 - Unrecoverable files live on this machine. Do not modify the running system: no reboot, no SMU write, no GRUB/initramfs edit unless the user runs the target themselves.
 
-## `bc-250-handoff.md`
+## `HANDOFF.md`
 
 The handoff is the decision record and platform reference, not a changelog and not a task list.
 
