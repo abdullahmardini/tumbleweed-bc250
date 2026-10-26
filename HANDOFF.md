@@ -1,6 +1,6 @@
 # BC-250 handoff
 
-Status: packages built in `home:superppl:bc250` and installed from the `bc250` repo (2026-10-25 18:53). `bc250-40cu` retired 2026-10-26: `bc250-setup` 0.2.0 obsoletes it (host still has 0.1.0 until `zypper dup`). `bc250-amdgpu-kmp-default` r1 (mode off by default) is installed but not loaded yet (no reboot since); r2 enables mode 3. Governor `max = 1500`. BIOS is P3.00 Chipset Menu with a 512 MB VRAM split. 8 cores / 16 threads verified 2026-10-25 19:48.
+Status: packages built in `home:superppl:bc250` and installed from the `bc250` repo (2026-10-25 18:53). `bc250-40cu` retired 2026-10-26 and removed from the host by `zypper dup` (`bc250-setup` 0.2.0). 40 CU verified 2026-10-25 21:19 with `bc250-amdgpu-kmp-default` r2: mode 3, four `bc250-40cu-enable` lines `CC=0xfff80000->0xffe00000 SPI=0x00000007->0x0000001f`, `active_cu_number 40`, RADV `num_cu = 40`. Governor `max = 1500`, active. BIOS is P3.00 Chipset Menu with a 512 MB VRAM split. 8 cores / 16 threads verified 2026-10-25 19:48.
 Goal: run the BC-250 on openSUSE Tumbleweed with packages built in the openSUSE Build Service (OBS), contributing upstream where AI contributions are accepted.
 
 ## Decision
@@ -61,7 +61,7 @@ Verified 2026-10-25 19:48, after a warm reboot: `nproc` 16, `Core(s) per socket:
 
 Checked 2026-10-25 19:02, read-only (no journal or SMN access):
 
-- `bc250-8core-unlock.service` and the governor are enabled by the preset. The RPM was installed at 18:53 and its unit only starts at boot, so the boot at 18:58 is the first time it ran. `boot` only acts on 0x77, and it logged `mask set to 0xFF`, so this board's factory mask was 0x77. 00:00.0 is `1022:13e0` (Ariel Root Complex). Since package r2, exit 0 means the mask reads 0xFF (*verify on host* after installing r2).
+- `bc250-8core-unlock.service` and the governor are enabled by the preset. The RPM was installed at 18:53 and its unit only starts at boot, so the boot at 18:58 is the first time it ran. `boot` only acts on 0x77, and it logged `mask set to 0xFF`, so this board's factory mask was 0x77. 00:00.0 is `1022:13e0` (Ariel Root Complex). Since package r2, exit 0 means the mask reads 0xFF Verified with r2 on the 21:19 boot: exit 0, `already unlocked (0xFF …)`.
 - Each boot the unit sets the mask; the cores only appear after the *next* warm reboot. One soft reboot after install cannot show 8 cores.
 - `present` = `possible` = `0-11`, no `nr_cpus`/`maxcpus` on the cmdline. `/sys/kernel/reboot/mode` is `cold`, type `acpi`. MADT (`APIC`, 222 bytes) and the kernel log need root.
 - Upstream issue #1: on the same `BC250_3.00_CHIPSETMENU.ROM`, the mask reads `0x7D` (cores 1 and 7 off), and the unit logs `unexpected mask 0x7D, not touching anything`. Unmerged PR #2 accepts any mask with one core off per 4-core cluster. Its hardware-test sections are unfilled placeholders, so there is no published evidence a 0x7D board unlocked. Not adopted: it widens what the script acts on without evidence, and this board is 0x77.
@@ -97,8 +97,9 @@ Measured on this board (reported by the user, 2026-10-25):
 | --- | --- | --- | --- |
 | Unigine Superposition 1080p Extreme | Stock 24 CU, 6 cores, governor active, BIOS P3.00, kernel 7.3.0-1, Mesa 26.2.5 | 3164, 3190, 3191 | 3182 |
 | Unigine Superposition 1080p Extreme | 24 CU, 8 cores, governor active, fan curves changed by the user | 3775, 3787, 3733 | 3765 (+18%) |
+| Unigine Superposition 1080p Extreme | 40 CU, 8 cores, governor max 1500 MHz, fan curves changed | 4124, 4128, 4125 | 4126 (+30% vs stock, +10% vs 8-core) |
 
-The +18% has two changes at once (8 cores and fan curves). The user believes the stock run did not throttle, but this is unverified: no clocks or temperatures were logged during either run.
+The +18% has two changes at once (8 cores and fan curves). The user believes the stock run did not throttle, but this is unverified: no clocks or temperatures were logged during either run. The 40 CU row also lowers the governor max from 1850 to 1500 MHz; the 8-core run was at 1850.
 
 ## Suspend
 
@@ -191,7 +192,6 @@ From the sources below; none verified on this board yet.
 
 ## Open questions
 
-- Does `bc250-amdgpu` with `bc250_cc_write_mode=3` give 40 CU on this board? Check `modinfo -n amdgpu` (path in `updates/`), `cat /sys/module/amdgpu/parameters/bc250_cc_write_mode`, `sudo dmesg | grep -E 'bc250-40cu-enable|active_cu_number'` (per README: four lines `CC=0xfff80000->0xffe00000 SPI=0x00000007->0x0000001f`, and `active_cu_number 40`), `RADV_DEBUG=info vulkaninfo --summary 2>&1 | grep num_cu`, then Superposition against the 8-core 3765.
 - Where does the 1500 MHz cap for 40 CU live? The governor's `/etc` config is `%config(noreplace)` and owned by the governor package.
 
 ## Sources
