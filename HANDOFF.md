@@ -96,6 +96,9 @@ Measured on this board (reported by the user, 2026-10-25):
 | Benchmark | Config | Runs | Average |
 | --- | --- | --- | --- |
 | Unigine Superposition 1080p Extreme | Stock 24 CU, 6 cores, governor active, BIOS P3.00, kernel 7.3.0-1, Mesa 26.2.5 | 3164, 3190, 3191 | 3182 |
+| Unigine Superposition 1080p Extreme | 24 CU, 8 cores, governor active, fan curves changed by the user | 3775, 3787, 3733 | 3765 (+18%) |
+
+The +18% has two changes at once (8 cores and fan curves). The user believes the stock run did not throttle, but this is unverified: no clocks or temperatures were logged during either run.
 
 ## Suspend
 
