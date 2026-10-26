@@ -124,8 +124,9 @@ Verified on this board (2026-10-25, with `bc250-setup` installed):
 - **CPU rail power is in `gpu_metrics`** (format 2.2, 128 bytes, world-readable). `average_soc_power` (offset 0x2C) is SMU `Power[0]`, which the firmware header `smu11_driver_if_cyan_skillfish.h` labels VDDCR_VDD, the CPU core rail; `average_gfx_power` (0x2E) is VDDCR_GFX. Per-core power and temperature fields are invalid on the 8-core board. The governor bind-mounts a copy that patches only gfx activity (0x1C-0x1D). hwmon `vddnb` is the VDDCR_VDD voltage; hwmon `sclk` is wrong on 8-core boards (governor README).
 - Board PMICs per mothenjoyer69 `hardware.md`: ISL69247, ISL95712, ISL99360. The kernel's `isl68137` supports `isl69247`; whether its PMBus is reachable on the FCH SMBus is *verify on host*. No nct6686 channel is a 12 V input or current sense.
 - **Only power reading is amdgpu PPT** (`power1_average`), which is the whole APU, CPU plus GPU. About 43-45 W idle, 64 W with a desktop open.
-- **High idle draw (shortcoming):** 43-45 W PPT at idle. Under light load (5-9% busy, a game running, 706 samples) the split is PPT 45 W = CPU rail 4 W + GFX 15 W (governor floor 1000 MHz / 800 mV) + 26 W rest (SoC, memory, display; not split further). `pp_dpm_mclk` and fclk have a single level, so memory never clocks down. A true-idle split and the wall comparison are not done yet.
-- **`nct6686` channels are unlabeled:** VIN0/1/2/6/7/16, fan1-5, pwm1-5, AMD TSI temp, Thermistors 14/15. No public mapping exists. A wall meter (Kill-A-Watt) can calibrate PPT against real draw.
+- **High idle draw (shortcoming):** 43-45 W PPT at idle. Under light load (5-9% busy, a game running, 706 samples) the split is PPT 45 W = CPU rail 4 W + GFX 15 W (governor floor 1000 MHz / 800 mV) + 26 W rest (SoC, memory, display; not split further). `pp_dpm_mclk` and fclk have a single level, so memory never clocks down. A true-idle split is not done yet.
+- **Wall draw (Kill-A-Watt, user, 2026-10-25, 40 CU / 8 cores / 1500 MHz cap, stock cooler with user fan curves):** idle ~82 W. FurMark + s-tui stress: peak 250 W, settling to ~210 W as it throttles. FurMark alone: ~220 W. Idle wall minus idle PPT is ~37 W (PSU loss, fans, board, outside PPT); not split further.
+- **`nct6686` channels are unlabeled:** VIN0/1/2/6/7/16, fan1-5, pwm1-5, AMD TSI temp, Thermistors 14/15. No public mapping exists. A logging wall meter could calibrate PPT against real draw over time.
 - `k10temp` gives Tctl only.
 - PCIe ASPM policy is `default`; L1 is off on the NVMe (03:00.0) and the RTL8111H (04:00.0).
 
@@ -137,7 +138,7 @@ Verified on this board (2026-10-25, with `bc250-setup` installed):
 - 8 cores / 16 threads after the `bc250-8core-unlock` warm reboot (2026-10-25 19:48). Also worked on P2.00.
 - GPU is `card1` (`1002:13fe`, `amdgpu`).
 - BIOS `P3.00` Chipset Menu (2021-12-09), flashed 2026-10-25 from `P2.00`. UMA Frame Buffer 512M, IOMMU disabled. `mem_info_vram_total` 512 MiB, 14 GiB RAM visible (was 8192 MiB / 7.5 GiB).
-- No `svm` flag in `/proc/cpuinfo` and no `/dev/kvm`: SVM is off in BIOS setup. Local `osc build` uses chroot via `sudo /usr/bin/build` (NOPASSWD in `/etc/sudoers.d/osc-build`).
+- SVM enabled in BIOS setup 2026-10-25: `svm` on all 16 CPUs, `/dev/kvm` present. IOMMU still off (`/sys/class/iommu` empty). Local `osc build` uses chroot via `sudo /usr/bin/build` (NOPASSWD in `/etc/sudoers.d/osc-build`).
 - `fwupdmgr get-devices` lists no system firmware device (only CPU, GPU, NVMe). The board has no UEFI capsule update path, so `fwupdmgr` cannot flash its BIOS.
 - `CONFIG_ACPI_TABLE_UPGRADE=y`, `CONFIG_DEBUG_FS=y` and mounted, `MODULE_SIG_FORCE` not set. Secure Boot disabled (firmware reports unsupported). Lockdown `none`.
 - Stock firmware exposes no `cpuidle` or `cpufreq`. With `bc250-acpi-tables` installed, all 16 CPUs have `acpi_idle` (POLL/C1/C2) and `acpi-cpufreq` (2026-10-25).
