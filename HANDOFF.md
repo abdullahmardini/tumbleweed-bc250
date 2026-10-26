@@ -1,6 +1,6 @@
 # BC-250 handoff
 
-Status: all six packages built in `home:superppl:bc250`, none installed on the board yet. BIOS is P3.00 Chipset Menu with a 512 MB VRAM split. The 8-core unlock was reverted by the post-flash cold boot.
+Status: all six packages built in `home:superppl:bc250` and installed from the `bc250` repo (2026-10-25 18:53). BIOS is P3.00 Chipset Menu with a 512 MB VRAM split. Still 6 cores after one soft reboot; see 8-core below.
 Goal: run the BC-250 on openSUSE Tumbleweed with packages built in the openSUSE Build Service (OBS), contributing upstream where AI contributions are accepted.
 
 ## Decision
@@ -54,7 +54,16 @@ Build order. Each step is usable on its own; finish one before starting the next
 | `bc250-acpi-tables` | e-tho/bc250-acpi-fix v1.1.1, built with `iasl` | Drop-in `/usr/lib/dracut/dracut.conf.d/50-bc250-acpi.conf` sets `acpi_override` and `acpi_table_dir`. `%regenerate_initrd_post` rebuilds the initrd; suse-module-tools' posttrans calls `sdbootutil` on systemd-boot, so no loader entry edits. |
 | `bc250-setup` | `src/bc250-setup/` | Preset logic verified offline with `systemctl --root`: governor and 8-core enabled, 40 CU disabled. |
 
-## 40 CU
+## 8-core
+
+Checked 2026-10-25 19:02, read-only (no journal or SMN access):
+
+- `bc250-8core-unlock.service` and the governor are enabled by the preset. The RPM was installed at 18:53 and its unit only starts at boot, so the boot at 18:58 is the first time it ran. It exited 0, but `boot` also exits 0 when it refuses, so exit 0 does not mean the mask is set.
+- Each boot the unit sets the mask; the cores only appear after the *next* warm reboot. One soft reboot after install cannot show 8 cores.
+- `present` = `possible` = `0-11`, no `nr_cpus`/`maxcpus` on the cmdline. `/sys/kernel/reboot/mode` is `cold`, type `acpi`. MADT (`APIC`, 222 bytes) and the kernel log need root.
+- Upstream issue #1: on the same `BC250_3.00_CHIPSETMENU.ROM`, the mask reads `0x7D` (cores 1 and 7 off), and the unit logs `unexpected mask 0x7D, not touching anything`. Unmerged PR #2 accepts any mask with one core off per 4-core cluster; its author unlocked a `0x7D` board that way.
+- The installed ACPI tables declare 12 CPUs. After the unlock, CPUs 12-15 get no C-states until the 8-core tables (mendesrr) are packaged.
+
 
 `umr` is AMD's User Mode Register debugger (`tomstdenis/umr` on freedesktop GitLab). It reads and writes `amdgpu` registers through debugfs (`/sys/kernel/debug/dri/<N>/`), needs root, and is ordinary userspace C, so it does not track the kernel.
 
@@ -92,7 +101,7 @@ Verified read-only on this board (2026-10-25); kernel logs were unreadable becau
 - Bootloader is **systemd-boot** (`LOADER_TYPE="systemd-boot"`, `sdbootutil` present, no `grub2-mkconfig`). GRUB-based ACPI delivery does not apply.
 - Kernel `7.3.0-1-default`, root on LVM + btrfs snapshots, SELinux enabled on cmdline. `amdgpu` loaded; no `nct668x` module and no modprobe/modules-load config.
 - CPU family 23 model 71 (0x47); root complex `1022:13e0`.
-- 6 cores / 12 threads after the post-flash cold boot. The 8-core unlock worked before that (8 / 16 visible). Its hand-installed unit was removed with the script's `uninstall` verb, so nothing writes the SMU at boot.
+- 6 cores / 12 threads since the post-flash cold boot. The 8-core unlock worked on P2.00 (8 / 16 visible).
 - GPU is `card1` (`1002:13fe`, `amdgpu`).
 - BIOS `P3.00` Chipset Menu (2021-12-09), flashed 2026-10-25 from `P2.00`. UMA Frame Buffer 512M, IOMMU disabled. `mem_info_vram_total` 512 MiB, 14 GiB RAM visible (was 8192 MiB / 7.5 GiB).
 - No `svm` flag in `/proc/cpuinfo` and no `/dev/kvm`: SVM is off in BIOS setup. Local `osc build` uses chroot via `sudo /usr/bin/build` (NOPASSWD in `/etc/sudoers.d/osc-build`).
@@ -100,7 +109,7 @@ Verified read-only on this board (2026-10-25); kernel logs were unreadable becau
 - `CONFIG_ACPI_TABLE_UPGRADE=y`, `CONFIG_DEBUG_FS=y` and mounted, `MODULE_SIG_FORCE` not set. Secure Boot disabled (firmware reports unsupported). Lockdown `none`.
 - No `cpuidle` and no `cpufreq` in sysfs: stock firmware exposes no C-states or P-states, so the ACPI tables are needed.
 - hwmon shows `nvme`, `amdgpu`, `k10temp` only. No board sensor driver is loaded. `nct6683` has a `force` parameter.
-- Not installed: `sensors`, `coolercontrol`, `umr`, governor. `osc` is installed and authenticated (keyring).
+- Not installed: `sensors`, `coolercontrol`. `osc` is installed and authenticated (keyring).
 - In OSS: `osc 1.28.0`, `obs-service-cargo 7.2.2`, `cargo-packaging 1.5.0`, `coolercontrol 4.3.1`. `umr` only in the `hardware` devel project. Not in OSS: `nct6687`.
 
 ## Upstream licenses and AI policy
@@ -147,6 +156,7 @@ From the sources below; none verified on this board yet.
 
 ## Open questions
 
+- What does `bc250-8core-unlock` log on P3.00: `mask set to 0xFF`, or `unexpected mask 0x..`? Read it with `sudo journalctl -b -u bc250-8core-unlock`. If the mask is `0x7D`, patch the script to accept it (allowlist `0x77`, `0x7D`, as PR #2 offers).
 - Does the runtime 40 CU route speed anything up on a stock `amdgpu`? Test with a Vulkan benchmark before and after `bc250-40cu apply`.
 - Does `umr -b <se> <sh> x -r '*.*.mmSPI_PG_ENABLE_STATIC_WGP_MASK'` resolve on this board, and what does its output look like? `bc250-40cu` parses the last hex word; only tested against a fake `umr`.
 - Where does the 1500 MHz cap for 40 CU live? The governor's `/etc` config is `%config(noreplace)` and owned by the governor package.
@@ -168,6 +178,7 @@ From the sources below; none verified on this board yet.
 - https://github.com/duggasco/bc250-40cu-unlock (archived; `docs/technical-report.md`)
 - https://github.com/WinnieLV/bc250-cu-live-manager
 - https://github.com/GabriWar/bc250-core-cu-unlock
+- https://github.com/GabriWar/bc250-core-cu-unlock/issues/1 (mask `0x7D` on P3.00 Chipset Menu) and pull/2
 - https://github.com/mendesrr/bc250-acpi-fix-updated-8c
 - https://github.com/e-tho/bc250-acpi-fix
 - https://github.com/Fred78290/nct6687d
