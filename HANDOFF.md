@@ -42,7 +42,7 @@ Build order. Each step is usable on its own; finish one before starting the next
 | 8-core | SMU message `0x98` sets the core mask | `bc250-8core-unlock` |
 | Sensors | Reading only needs `options nct6683 force=1`. `nct6687` is only for software fan curves. | Config in `bc250-setup` |
 | Power | CPU idle and frequency states come from ACPI tables. The governor covers the GPU; its voltage curve is the undervolt. | `bc250-acpi-tables` |
-| Suspend | Blocked: the board never wakes from s2idle | Config in `bc250-setup` |
+| Suspend | Disabled: s2idle resume is unreliable and saves almost no power | Config in `bc250-setup` |
 
 ## OBS packages (`home:superppl:bc250`, built 2026-10-26)
 
@@ -102,14 +102,17 @@ The +18% has two changes at once (8 cores and fan curves). The user believes the
 
 ## Suspend
 
-Verified read-only on this board (2026-10-25); kernel logs were unreadable because the user is not in `systemd-journal`:
+Verified on this board (2026-10-25; journals read with the user in `systemd-journal`):
 
 - `/sys/power/mem_sleep` offers only `[s2idle]`. The DSDT (same on BIOS 1.00-5.00, public dump in lorek123/bc250-notes) has `_S0`, `_S4`, `_S5`, no `_S3`, and no LPS0 device (`PNP0D80`).
-- No `amd_pmc` device: the driver matches AMDI0005-000C/AMD0004-5, and the board has none.
-- amdgpu skips its suspend path without the FADT `LOW_POWER_S0` flag, so the GPU stays up through s2idle. With no cpuidle driver the CPUs only `HLT`.
-- The ACPI SCI and every GPE counter read 0 for the boot, so wake delivery is unproven.
-- Community reports (elektricm troubleshooting, SkillFishOS) match: enters s2idle, never wakes, only a power cut recovers. No known fix; the ACPI tables do not claim to fix it.
-- GNOME's default idle action on AC is `suspend` after 900 s. `bc250-setup` ships `AllowSuspend=no` / `AllowHibernation=no`, so logind reports `CanSuspend=na` and GNOME stops offering it.
+- **s2idle has resumed once and hung once.** 2026-10-24 (P2.00, stock tables, 12 threads): `PM: suspend entry (s2idle)` 21:55:19, `PM: suspend exit` 08:09:06; that boot then ends at 08:10:07 with no shutdown sequence (hang or forced power-off, unknown). 2026-10-25 16:32:05 (P3.00, stock tables, 12 threads): entry, no exit. Wake source unknown (`pm_debug_messages` was 0).
+- **s2idle saves almost nothing here.** amdgpu never suspends: its only line is `BIOS has not been configured for suspend-to-idle` (no FADT `LOW_POWER_S0`). No S0i3 is possible: no LPS0 device, and `amd_pmc` does not match root complex `1022:13e0`. CPUs reach at most C2 (with the ACPI tables).
+- Wake-capable: fixed power button, RTC (`rtc_cmos`), USB/PCIe GPEs per `/proc/acpi/wakeup`. All USB root hubs have `power/wakeup` = `disabled`, so a USB keyboard probably cannot wake it (from `ohci-hub.c`, not tested).
+- `pm_test` on s2idle only supports `freezer`, `devices`, `platform` (none enters the idle loop, so none tests wake). The decisive test is `rtcwake -m freeze -s 60` at the console, ready to cut power. Not run.
+- **Hibernate:** `_S4` present, `/sys/power/disk` is `[platform]`, `CONFIG_HIBERNATION=y`. Blocked: swap LV `system/swap` is 2 GiB for 14 GiB RAM, and the 8-core unlock is lost on power-off, so the resume boot would have 12 CPUs. Not tested.
+- The P5clv ROM setup has an "ACPI Sleep State" (S1/S3/Suspend Disabled) option; the ROM DSDT has no `_S3`, so it probably cannot add S3. Not tested.
+- Community: elektricm says resume is unreliable and on some boards the power button wakes it (PR #55). SkillFishOS disables all sleep.
+- GNOME's default idle action on AC is `suspend` after 900 s; both recorded attempts were this. `bc250-setup` ships `AllowSuspend=no` / `AllowHibernation=no`, so logind reports `CanSuspend=na` and GNOME stops offering it.
 
 ## Sensors
 
