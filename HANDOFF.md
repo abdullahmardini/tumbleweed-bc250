@@ -1,15 +1,15 @@
 # BC-250 handoff
 
-Status: all six packages built in `home:superppl:bc250` and installed from the `bc250` repo (2026-10-25 18:53). BIOS is P3.00 Chipset Menu with a 512 MB VRAM split. Still 6 cores after one soft reboot; see 8-core below.
+Status: all six packages built in `home:superppl:bc250` and installed from the `bc250` repo (2026-10-25 18:53). `bc250-amdgpu` (the 40 CU KMP) built 2026-10-26, not installed. BIOS is P3.00 Chipset Menu with a 512 MB VRAM split. Still 6 cores after one soft reboot; see 8-core below.
 Goal: run the BC-250 on openSUSE Tumbleweed with packages built in the openSUSE Build Service (OBS), contributing upstream where AI contributions are accepted.
 
 ## Decision
 
 Option 3: a small OBS project plus one `bc250-setup` meta RPM. Setting up a host is `zypper ar` + `zypper in bc250-setup`; `zypper dup` keeps it current.
 
-- One package per piece: governor, `umr`, the 40 CU script, ACPI tables, the 8-core script.
+- One package per piece: governor, `umr`, the 40 CU `amdgpu` KMP, ACPI tables, the 8-core script.
 - `bc250-setup` depends on them. It ships the sensor config, the suspend block and a systemd preset. Its only scriptlet is one `systemctl preset` on first install: the unit packages install first and preset their units before the preset file exists.
-- The preset enables the governor and the 8-core unit. The 40 CU unit ships disabled until the runtime route is verified on this board (see 40 CU).
+- The preset enables the governor and the 8-core unit. The 40 CU unit stays disabled: the init-time KMP `bc250-amdgpu` supersedes the runtime route (see 40 CU). `bc250-setup` does not pull in the KMP; installing it and setting the module option are deliberate steps.
 - Per-board values (voltage curve, CU layout) stay in this repo.
 
 Build order. Each step is usable on its own; finish one before starting the next.
@@ -28,7 +28,7 @@ Build order. Each step is usable on its own; finish one before starting the next
 | 2. OBS packages, configs copied by hand | Setup stays a manual checklist. Option 3 is the same packages plus the meta RPM. |
 | 4. Upstream-first (Factory, devel projects) | Slow review loops before anything runs. Deferred to step 5. |
 | 5. No RPMs, upstream tarballs and scripts | Nothing updates on its own. |
-| 40 CU via DKMS or a patched kernel | The patch modifies `amdgpu` itself, so every Tumbleweed kernel bump means rebuilding the GPU driver. Its repo is archived. DKMS compiles on the host. A patched `kernel-default` in OBS means maintaining a kernel. |
+| 40 CU via DKMS or a patched `kernel-default` | DKMS compiles on the host. A patched `kernel-default` in OBS means maintaining a kernel. Chosen instead: a KMP that rebuilds only `amdgpu` from `kernel-source` in OBS (`bc250-amdgpu`); OBS rebuilds it when the kernel changes. |
 | Shipping WinnieLV's live manager | No license. `bc250-40cu` in `src/` is our own script built from the published register values. |
 | Masking sleep targets from a package | `/etc` is admin territory. A `sleep.conf.d` drop-in in `/usr/lib` does the same and can be overridden. |
 
@@ -37,7 +37,7 @@ Build order. Each step is usable on its own; finish one before starting the next
 | Piece | What it is | Package |
 | --- | --- | --- |
 | Governor | GPU clocks and voltage, the main GPU power saving | `cyan-skillfish-governor-smu` |
-| 40 CU | GPU register writes after boot, through `umr` | `umr` (linked from OBS `hardware`), `bc250-40cu` |
+| 40 CU | CC/SPI/RLC writes in `amdgpu` init, behind `amdgpu.bc250_cc_write_mode=3` | `bc250-amdgpu-kmp-default`. The runtime route (`bc250-40cu` through `umr`) is superseded. |
 | 8-core | SMU message `0x98` sets the core mask | `bc250-8core-unlock` |
 | Sensors | Reading only needs `options nct6683 force=1`. `nct6687` is only for software fan curves. | Config in `bc250-setup` |
 | Power | CPU idle and frequency states come from ACPI tables. The governor covers the GPU; its voltage curve is the undervolt. | `bc250-acpi-tables` |
@@ -53,6 +53,7 @@ Build order. Each step is usable on its own; finish one before starting the next
 | `bc250-8core-unlock` | GabriWar commit `c532536`, script and LICENSE only | The upstream tree also ships BIOS images, so the archive is not used. Our unit runs `boot` `Before=` the governor. |
 | `bc250-acpi-tables` | e-tho/bc250-acpi-fix v1.1.1, built with `iasl` | Drop-in `/usr/lib/dracut/dracut.conf.d/50-bc250-acpi.conf` sets `acpi_override` and `acpi_table_dir`. `%regenerate_initrd_post` rebuilds the initrd; suse-module-tools' posttrans calls `sdbootutil` on systemd-boot, so no loader entry edits. |
 | `bc250-setup` | `src/bc250-setup/` | Preset logic verified offline with `systemctl --root`: governor and 8-core enabled, 40 CU disabled. |
+| `bc250-amdgpu` → `bc250-amdgpu-kmp-default` | duggasco `ae7c30c` patch, rebased onto 7.3 in `src/bc250-amdgpu/`; `drivers/gpu/drm/amd` from `kernel-source` 7.3.0-1.1 | Builds only `amdgpu.ko` with `M=` against `linux-obj`, installs to `updates/` (depmod searches it first). `%prep` uses `patch --fuzz=0`, so a moved hunk fails the build; the unrebased patch fails with `Hunk #2 FAILED`. `%build` checks `modinfo` for the parameter and that vermagic is `7.3.0-1-default`. All 1156 `ksym()` requires match the installed `kernel-default` 7.3.0-1.1; firmware list (725) and `depends` equal the in-tree module. `-b` rebuilds the initrd on install. Module is unsigned (taints, loads: `MODULE_SIG_FORCE` off). Ships `bc250-40cu.conf` as a commented example in its docs, not in `modprobe.d`. |
 
 ## 8-core
 
@@ -64,6 +65,7 @@ Checked 2026-10-25 19:02, read-only (no journal or SMN access):
 - Upstream issue #1: on the same `BC250_3.00_CHIPSETMENU.ROM`, the mask reads `0x7D` (cores 1 and 7 off), and the unit logs `unexpected mask 0x7D, not touching anything`. Unmerged PR #2 accepts any mask with one core off per 4-core cluster; its author unlocked a `0x7D` board that way.
 - The installed ACPI tables declare 12 CPUs. After the unlock, CPUs 12-15 get no C-states until the 8-core tables (mendesrr) are packaged.
 
+## 40 CU
 
 `umr` is AMD's User Mode Register debugger (`tomstdenis/umr` on freedesktop GitLab). It reads and writes `amdgpu` registers through debugfs (`/sys/kernel/debug/dri/<N>/`), needs root, and is ordinary userspace C, so it does not track the kernel.
 
@@ -75,7 +77,9 @@ Registers, per shader array (SE0-1 × SH0-1), from duggasco's technical report:
 | `SPI_PG_ENABLE_STATIC_WGP_MASK` | `0x7` | `0x1f` | Dispatch gate: which WGPs receive waves |
 | `RLC_PG_ALWAYS_ON_WGP_MASK` (global) | | `0x1f` | Set alongside SPI by duggasco and WinnieLV |
 
-**The runtime route is unverified.** amdgpu reads `CC_GC_SHADER_ARRAY_CONFIG` once, at driver init. duggasco's 4-state test shows SPI `0x1f` with stock enumeration gives no compute gain (302 → 302 tok/s); the 1.61× needs both. The published speedups all use the patched kernel, which writes CC at init. WinnieLV's live manager and elektricm's "Option 4" write CC after init, which does not change the topology the driver already cached. Whether games or Vulkan compute still gain is untested. Measure before and after on this board.
+**Route: the init-time patched module (`bc250-amdgpu`).** In the 7.3 source, `gfx_v10_0_get_cu_info()` is called from `gfx_v10_0_constants_init()` in `gfx_v10_0_hw_init()` (also run on resume and GPU reset). It reads `CC_GC_SHADER_ARRAY_CONFIG` there and caches the CU count and bitmaps that RADV and KFD see. The patch writes CC, SPI and RLC just before that read, so the writes are redone on every hw_init. duggasco's 4-state test shows SPI `0x1f` with stock enumeration gives no compute gain (302 → 302 tok/s); the 1.61× needs both. All published speedups use the patched module.
+
+**The runtime route (`bc250-40cu`) is superseded and likely ineffective.** It writes CC after init, which cannot change the cached topology (from the source above); the SPI write alone gave no gain in duggasco's test. Not measured on this board. The KMP must not be combined with `bc250-40cu apply`.
 
 The registers use debugfs MMIO, not the SMU mailbox, so the writes do not contend with the governor.
 
@@ -125,7 +129,8 @@ No project below publishes a contributing guide or AI policy. openSUSE has no AI
 | fanoush/bc250_memcfg | MIT |
 | tomstdenis/umr | MIT (`LICENSE`, AMD 2017) |
 | WinnieLV/bc250-cu-live-manager | **none**: not redistributable, cannot ship in OBS as-is |
-| this repo | MIT (`LICENSE`) |
+| duggasco/bc250-40cu-unlock | GPL-2.0 (README; no `LICENSE` file). The patch carries `Signed-off-by` against GPL-2.0 kernel code. |
+| this repo | MIT (`LICENSE`), except `src/bc250-amdgpu/bc250-40cu-amdgpu.patch` (GPL-2.0) |
 
 Contribution candidates for filippor/cyan-skillfish-governor:
 
@@ -151,13 +156,14 @@ From the sources below; none verified on this board yet.
 - **Unknown core masks.** Stock mask at SMN `0x0115A870` is usually `0x77`, but boards reading `0xD7` exist. Refuse to act on any mask that isn't the expected value. Both packaged scripts refuse.
 - **Unlocks are volatile.** Cold boot reverts both the 8-core and 40 CU unlocks; warm reboot keeps them. Nothing is flashed, so pulling power is the rollback.
 - **One sensor driver.** In-kernel `nct6683` and out-of-tree `nct6687` conflict. Load one, blacklist the other.
-- **40 CU kernel patch is dead.** `duggasco/bc250-40cu-unlock` is archived and will not track new kernels.
+- **40 CU patch upstream is archived.** `duggasco/bc250-40cu-unlock` will not track new kernels; we carry the rebase in `src/bc250-amdgpu/`. When a kernel moves the hunk context, the OBS build fails at `%prep` until rebased. The KMP's `ksym()` requires pin it to one kernel build; by weak-modules2's design a newer kernel without a rebuilt KMP boots its own in-tree `amdgpu` (24 CU). Not observed yet.
+- **40 CU loads from the initrd.** `plymouth` is installed, so dracut's `drm` module puts `amdgpu` in the initrd (initrd is root-only, contents not checked). `/etc/modprobe.d` is copied into the initrd: after adding or removing the option, run `sudo dracut -f --regenerate-all`. Rollback: remove the option, regenerate, reboot; or `zypper rm bc250-amdgpu-kmp-default`, which rebuilds the initrd.
 - **ACPI tables load from the initrd.** If a table breaks boot, pick an older entry or snapshot in systemd-boot, then remove `bc250-acpi-tables`.
 
 ## Open questions
 
 - What does `bc250-8core-unlock` log on P3.00: `mask set to 0xFF`, or `unexpected mask 0x..`? Read it with `sudo journalctl -b -u bc250-8core-unlock`. If the mask is `0x7D`, patch the script to accept it (allowlist `0x77`, `0x7D`, as PR #2 offers).
-- Does the runtime 40 CU route speed anything up on a stock `amdgpu`? Test with a Vulkan benchmark before and after `bc250-40cu apply`.
+- Does `bc250-amdgpu` with `bc250_cc_write_mode=3` give 40 CU on this board? Check `modinfo -n amdgpu` (path in `updates/`), `cat /sys/module/amdgpu/parameters/bc250_cc_write_mode`, `sudo dmesg | grep -E 'bc250-40cu-enable|active_cu_number'` (per README: four lines `CC=0xfff80000->0xffe00000 SPI=0x00000007->0x0000001f`, and `active_cu_number 40`), `RADV_DEBUG=info vulkaninfo --summary 2>&1 | grep num_cu`, then Superposition against the stock 3182.
 - Does `umr -b <se> <sh> x -r '*.*.mmSPI_PG_ENABLE_STATIC_WGP_MASK'` resolve on this board, and what does its output look like? `bc250-40cu` parses the last hex word; only tested against a fake `umr`.
 - Where does the 1500 MHz cap for 40 CU live? The governor's `/etc` config is `%config(noreplace)` and owned by the governor package.
 
