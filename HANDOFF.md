@@ -1,6 +1,6 @@
 # BC-250 handoff
 
-Status: packages built in `home:superppl:bc250` and installed from the `bc250` repo (2026-10-25 18:53). `bc250-40cu` retired 2026-10-26 and removed from the host by `zypper dup` (`bc250-setup` 0.2.0). 40 CU verified 2026-10-25 21:19 with `bc250-amdgpu-kmp-default` r2: mode 3, four `bc250-40cu-enable` lines `CC=0xfff80000->0xffe00000 SPI=0x00000007->0x0000001f`, `active_cu_number 40`, RADV `num_cu = 40`. Governor 500-1500 MHz, active. BIOS is P3.00 Chipset Menu with a 512 MB VRAM split. 8 cores / 16 threads verified 2026-10-25 19:48.
+Status: packages built in `home:superppl:bc250` and installed from the `bc250` repo (2026-10-25 18:53). `bc250-40cu` retired 2026-10-26 and removed from the host by `zypper dup` (`bc250-setup` 0.2.0). 40 CU verified 2026-10-25 21:19 with `bc250-amdgpu-kmp-default` r2: mode 3, four `bc250-40cu-enable` lines `CC=0xfff80000->0xffe00000 SPI=0x00000007->0x0000001f`, `active_cu_number 40`, RADV `num_cu = 40`. Governor 500-1850 MHz, active. BIOS is P3.00 Chipset Menu with a 512 MB VRAM split. 8 cores / 16 threads verified 2026-10-25 19:48.
 Goal: run the BC-250 on openSUSE Tumbleweed with packages built in the openSUSE Build Service (OBS), contributing upstream where AI contributions are accepted.
 
 ## Decision
@@ -9,13 +9,13 @@ Option 3: a small OBS project plus one `bc250-setup` meta RPM. Setting up a host
 
 - One package per piece: governor, `umr` (debug tool, nothing requires it), the 40 CU `amdgpu` KMP, ACPI tables, the 8-core script.
 - `bc250-setup` depends on them. It ships the sensor config, the suspend block and a systemd preset. Its only scriptlet is one `systemctl preset` on first install: the unit packages install first and preset their units before the preset file exists.
-- The preset enables the governor and the 8-core unit. `bc250-setup` does not pull in the KMP. `bc250-setup` 0.2.0 has `Obsoletes: bc250-40cu <= 0.1.0` and `Provides: bc250-40cu = 0.2.0`, so `zypper up`/`dup` removes the retired runtime package. Installing the KMP enables 40 CU: it ships `options amdgpu bc250_cc_write_mode=3` in `/usr/lib/modprobe.d/50-bc250-40cu.conf`. The governor package (r2) ships `min = 500`, `max = 1500` in its `%config(noreplace)` default (upstream: 1000-1850); its `%prep` fails if upstream changes those lines. An edited `/etc` config is kept and the new default lands as `.rpmnew`.
+- The preset enables the governor and the 8-core unit. `bc250-setup` does not pull in the KMP. `bc250-setup` 0.2.0 has `Obsoletes: bc250-40cu <= 0.1.0` and `Provides: bc250-40cu = 0.2.0`, so `zypper up`/`dup` removes the retired runtime package. Installing the KMP enables 40 CU: it ships `options amdgpu bc250_cc_write_mode=3` in `/usr/lib/modprobe.d/50-bc250-40cu.conf`. The governor package (r3) ships `min = 500`, `max = 1850` in its `%config(noreplace)` default (upstream: 1000-1850); its `%prep` fails if upstream changes those lines. Ceiling 1850 is the user's decision (2026-10-26) from the heat-soaked Superposition run. An edited `/etc` config is kept and the new default lands as `.rpmnew`.
 - Per-board values (voltage curve, CU layout) stay in this repo.
 
 Build order. Each step is usable on its own; finish one before starting the next.
 
 1. Governor RPM, installed with `zypper` and running.
-2. `umr` package and the 40 CU KMP (`bc250-amdgpu`), governor capped at 1500 MHz / 900 mV.
+2. `umr` package and the 40 CU KMP (`bc250-amdgpu`), governor 500-1850 MHz.
 3. Sensor config, ACPI tables, `bc250-setup`.
 4. Package the 8-core script.
 5. Upstream contributions, after asking each maintainer about AI-assisted PRs.
@@ -100,7 +100,7 @@ Measured on this board (reported by the user, 2026-10-25):
 | Unigine Superposition 1080p Extreme | 40 CU, 8 cores, governor max 1500 MHz, fan curves changed | 4124, 4128, 4125 | 4126 (+30% vs stock, +10% vs 8-core) |
 | Unigine Superposition 1080p Extreme | 40 CU, 8 cores, governor 500-1850 MHz (930 mV safe point), fan curves changed, after a FurMark + s-tui heat soak | 4887, 4893, 4888 | 4889 (+54% vs stock, +18% vs 1500 MHz) |
 
-The +18% has two changes at once (8 cores and fan curves). The user believes the stock run did not throttle, but this is unverified: no clocks or temperatures were logged during either run. The 40 CU row also lowers the governor max from 1850 to 1500 MHz; the 8-core run was at 1850. The 1850 MHz run logged no temperatures or clocks either, so whether it throttled (governor at 85 °C GPU edge, CPU at Tctl 100 °C) is unknown; the package keeps `max = 1500` until a logged run shows otherwise.
+The +18% has two changes at once (8 cores and fan curves). The user believes the stock run did not throttle, but this is unverified: no clocks or temperatures were logged during either run. The 40 CU row also lowers the governor max from 1850 to 1500 MHz; the 8-core run was at 1850. The 1850 MHz run logged no temperatures or clocks either, so whether it throttled (governor at 85 °C GPU edge, CPU at Tctl 100 °C) is unknown; the package ships `max = 1850` anyway (user's decision); a logged run (`bench-log.py`-style: clocks, edge, Tctl) is still the check.
 
 ## Suspend
 
