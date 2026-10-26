@@ -106,6 +106,16 @@ Verified read-only on this board (2026-10-25); kernel logs were unreadable becau
 - Community reports (elektricm troubleshooting, SkillFishOS) match: enters s2idle, never wakes, only a power cut recovers. No known fix; the ACPI tables do not claim to fix it.
 - GNOME's default idle action on AC is `suspend` after 900 s. `bc250-setup` ships `AllowSuspend=no` / `AllowHibernation=no`, so logind reports `CanSuspend=na` and GNOME stops offering it.
 
+## Sensors
+
+Verified on this board (2026-10-25, with `bc250-setup` installed):
+
+- hwmon: `nct6686` (via `nct6683`), `amdgpu`, `k10temp`, `nvme`.
+- **No CPU power.** `intel_rapl_msr` loads but `/sys/class/powercap` is empty, so there is no RAPL package or core domain.
+- **Only power reading is amdgpu PPT** (`power1_average`), which is the whole APU, CPU plus GPU. About 43-45 W idle, 64 W with a desktop open.
+- **`nct6686` channels are unlabeled:** VIN0/1/2/6/7/16, fan1-5, pwm1-5, AMD TSI temp, Thermistors 14/15. No public mapping exists. A wall meter (Kill-A-Watt) can calibrate PPT against real draw.
+- `k10temp` gives Tctl only.
+
 ## Host state (checked 2026-10-25, read-only, no SMU access)
 
 - Bootloader is **systemd-boot** (`LOADER_TYPE="systemd-boot"`, `sdbootutil` present, no `grub2-mkconfig`). GRUB-based ACPI delivery does not apply.
@@ -118,7 +128,7 @@ Verified read-only on this board (2026-10-25); kernel logs were unreadable becau
 - `fwupdmgr get-devices` lists no system firmware device (only CPU, GPU, NVMe). The board has no UEFI capsule update path, so `fwupdmgr` cannot flash its BIOS.
 - `CONFIG_ACPI_TABLE_UPGRADE=y`, `CONFIG_DEBUG_FS=y` and mounted, `MODULE_SIG_FORCE` not set. Secure Boot disabled (firmware reports unsupported). Lockdown `none`.
 - No `cpuidle` and no `cpufreq` in sysfs: stock firmware exposes no C-states or P-states, so the ACPI tables are needed.
-- hwmon shows `nvme`, `amdgpu`, `k10temp` only. No board sensor driver is loaded. `nct6683` has a `force` parameter.
+- Before `bc250-setup`: hwmon showed `nvme`, `amdgpu`, `k10temp` only. See Sensors for the current state.
 - Not installed: `sensors`, `coolercontrol`. `osc` is installed and authenticated (keyring).
 - In OSS: `osc 1.28.0`, `obs-service-cargo 7.2.2`, `cargo-packaging 1.5.0`, `coolercontrol 4.3.1`. `umr` only in the `hardware` devel project. Not in OSS: `nct6687`.
 
