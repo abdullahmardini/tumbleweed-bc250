@@ -6,3 +6,5 @@ obs/home:superppl:bc250/
 # Build logs and upstream clones used while packaging
 obs/*.log
 obs/upstream/
+# amd-s2idle reports: hold monitor EDID serials
+idle-report/
