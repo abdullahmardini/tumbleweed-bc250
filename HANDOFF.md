@@ -50,8 +50,8 @@ Build order. Each step is usable on its own; finish one before starting the next
 | `cyan-skillfish-governor-smu` | tag v0.4.14 (`7b08fdc`), crates vendored with `cargo_vendor` | 37 tests pass in `%check`. Carries `dbus-policy-scope-to-destination.patch` (below). rpmlint `dbus-file-unauthorized` stays until the SUSE security team whitelists the policy; that only matters for Factory. |
 | `umr` | `osc linkpac hardware umr` (1.0.11, MIT) | 1.0.11 has `cyan_skillfish.asic` and all three 40 CU registers in `gc_10_1_0.reg`. |
 | `bc250-40cu` | `src/bc250-40cu` and `src/bc250-40cu.service` | Unit `Requires=` the governor. |
-| `bc250-8core-unlock` | GabriWar commit `c532536`, script and LICENSE only | The upstream tree also ships BIOS images, so the archive is not used. Our unit runs `boot` `Before=` the governor. |
-| `bc250-acpi-tables` | e-tho/bc250-acpi-fix v1.1.1, built with `iasl` | Drop-in `/usr/lib/dracut/dracut.conf.d/50-bc250-acpi.conf` sets `acpi_override` and `acpi_table_dir`. `%regenerate_initrd_post` rebuilds the initrd; suse-module-tools' posttrans calls `sdbootutil` on systemd-boot, so no loader entry edits. |
+| `bc250-8core-unlock` | GabriWar commit `c532536`, script and LICENSE only, plus `bc250-8core-unlock-fail-on-refusal.patch` | The upstream tree also ships BIOS images, so the archive is not used. The patch makes `boot` exit 1 on every refusal and failure (unexpected mask, SMN read or mailbox error, unlock not taking) and refuses a 00:00.0 that is not `1022:13e0` before any register access. Our unit runs `boot` `Before=` the governor, ordering only (no `Requires=`): a failure shows in `systemctl --failed` and does not stop the governor. r2 (2026-10-26) built; exit codes tested against a fake `setpci` only. |
+| `bc250-acpi-tables` | e-tho/bc250-acpi-fix v1.1.1, built with `iasl` | Drop-in `/usr/lib/dracut/dracut.conf.d/50-bc250-acpi.conf` sets `acpi_override` and `acpi_table_dir`. `%regenerate_initrd_post` rebuilds the initrd; suse-module-tools' posttrans calls `sdbootutil` on systemd-boot, so no loader entry edits. Covers all 16 processor objects, so the same tables serve stock and unlocked boards (stock DSDT declares P000-P00F on BIOS 1.00-5.00; stock MADT marks the extra 4 disabled, per the lorek123 dump). `%check` fails the build if any P000-P00F lacks its methods (r2). mendesrr's 8-core fork is not used: no license, it publishes C3 (e-tho reverted C3 in `25b4153` for freezes), and its `_PSD` puts all CPUs in one domain. e-tho credits mendesrr's 8-core extension. |
 | `bc250-setup` | `src/bc250-setup/` | Preset logic verified offline with `systemctl --root`: governor and 8-core enabled, 40 CU disabled. |
 | `bc250-amdgpu` → `bc250-amdgpu-kmp-default` | duggasco `ae7c30c` patch, rebased onto 7.3 in `src/bc250-amdgpu/`; `drivers/gpu/drm/amd` from `kernel-source` 7.3.0-1.1 | Builds only `amdgpu.ko` with `M=` against `linux-obj`, installs to `updates/` (depmod searches it first). `%prep` uses `patch --fuzz=0`, so a moved hunk fails the build; the unrebased patch fails with `Hunk #2 FAILED`. `%build` checks `modinfo` for the parameter and that vermagic is `7.3.0-1-default`. All 1156 `ksym()` requires match the installed `kernel-default` 7.3.0-1.1; firmware list (725) and `depends` equal the in-tree module. `-b` rebuilds the initrd on install. Module is unsigned (taints, loads: `MODULE_SIG_FORCE` off). Ships `/usr/lib/modprobe.d/50-bc250-40cu.conf` with mode 3 enabled; dracut `80base` copies `/usr/lib/modprobe.d/*.conf` into the initrd. |
 
@@ -61,11 +61,11 @@ Verified 2026-10-25 19:48, after a warm reboot: `nproc` 16, `Core(s) per socket:
 
 Checked 2026-10-25 19:02, read-only (no journal or SMN access):
 
-- `bc250-8core-unlock.service` and the governor are enabled by the preset. The RPM was installed at 18:53 and its unit only starts at boot, so the boot at 18:58 is the first time it ran. It exited 0, but `boot` also exits 0 when it refuses, so exit 0 does not mean the mask is set.
+- `bc250-8core-unlock.service` and the governor are enabled by the preset. The RPM was installed at 18:53 and its unit only starts at boot, so the boot at 18:58 is the first time it ran. `boot` only acts on 0x77, and it logged `mask set to 0xFF`, so this board's factory mask was 0x77. 00:00.0 is `1022:13e0` (Ariel Root Complex). Since package r2, exit 0 means the mask reads 0xFF (*verify on host* after installing r2).
 - Each boot the unit sets the mask; the cores only appear after the *next* warm reboot. One soft reboot after install cannot show 8 cores.
 - `present` = `possible` = `0-11`, no `nr_cpus`/`maxcpus` on the cmdline. `/sys/kernel/reboot/mode` is `cold`, type `acpi`. MADT (`APIC`, 222 bytes) and the kernel log need root.
-- Upstream issue #1: on the same `BC250_3.00_CHIPSETMENU.ROM`, the mask reads `0x7D` (cores 1 and 7 off), and the unit logs `unexpected mask 0x7D, not touching anything`. Unmerged PR #2 accepts any mask with one core off per 4-core cluster; its author unlocked a `0x7D` board that way.
-- The installed ACPI tables declare 12 CPUs. After the unlock, CPUs 12-15 get no C-states until the 8-core tables (mendesrr) are packaged.
+- Upstream issue #1: on the same `BC250_3.00_CHIPSETMENU.ROM`, the mask reads `0x7D` (cores 1 and 7 off), and the unit logs `unexpected mask 0x7D, not touching anything`. Unmerged PR #2 accepts any mask with one core off per 4-core cluster. Its hardware-test sections are unfilled placeholders, so there is no published evidence a 0x7D board unlocked. Not adopted: it widens what the script acts on without evidence, and this board is 0x77.
+- ACPI tables cover all 16 threads (verified 2026-10-25, read-only): e-tho v1.1.1 scopes `\_PR.P000`-`P00F` in SSDT-CPU and SSDT-PST (`iasl -d`). Loaded SSDT1/3/4 are 1019/1339/60 bytes, the same as `/usr/lib/bc250-acpi/*.aml`. CPUs 0-15 have `acpi_idle` POLL/C1/C2 (C2 `ACPI IOPORT 0x414`) and `acpi-cpufreq`, 8 steps 800 MHz to 3.2 GHz. cpuN has apicid N and firmware node `\_PR_.P00N`; siblings (2k, 2k+1) match the per-core `_CSD`/`_PSD`.
 
 ## 40 CU
 
@@ -133,7 +133,7 @@ Verified on this board (2026-10-25, with `bc250-setup` installed):
 - No `svm` flag in `/proc/cpuinfo` and no `/dev/kvm`: SVM is off in BIOS setup. Local `osc build` uses chroot via `sudo /usr/bin/build` (NOPASSWD in `/etc/sudoers.d/osc-build`).
 - `fwupdmgr get-devices` lists no system firmware device (only CPU, GPU, NVMe). The board has no UEFI capsule update path, so `fwupdmgr` cannot flash its BIOS.
 - `CONFIG_ACPI_TABLE_UPGRADE=y`, `CONFIG_DEBUG_FS=y` and mounted, `MODULE_SIG_FORCE` not set. Secure Boot disabled (firmware reports unsupported). Lockdown `none`.
-- No `cpuidle` and no `cpufreq` in sysfs: stock firmware exposes no C-states or P-states, so the ACPI tables are needed.
+- Stock firmware exposes no `cpuidle` or `cpufreq`. With `bc250-acpi-tables` installed, all 16 CPUs have `acpi_idle` (POLL/C1/C2) and `acpi-cpufreq` (2026-10-25).
 - Before `bc250-setup`: hwmon showed `nvme`, `amdgpu`, `k10temp` only. See Sensors for the current state.
 - Not installed: `sensors`, `coolercontrol`. `osc` is installed and authenticated (keyring).
 - In OSS: `osc 1.28.0`, `obs-service-cargo 7.2.2`, `cargo-packaging 1.5.0`, `coolercontrol 4.3.1`. `umr` only in the `hardware` devel project. Not in OSS: `nct6687`.
@@ -152,6 +152,7 @@ No project below publishes a contributing guide or AI policy. openSUSE has no AI
 | tomstdenis/umr | MIT (`LICENSE`, AMD 2017) |
 | WinnieLV/bc250-cu-live-manager | **none**: not redistributable, cannot ship in OBS as-is |
 | duggasco/bc250-40cu-unlock | GPL-2.0 (README; no `LICENSE` file). The patch carries `Signed-off-by` against GPL-2.0 kernel code. |
+| mendesrr/bc250-acpi-fix-updated-8c | **none** (fork of bc250-collective/bc250-acpi-fix, also unlicensed): not redistributable |
 | this repo | MIT (`LICENSE`, confirmed by the user 2026-10-25), except `src/bc250-amdgpu/bc250-40cu-amdgpu.patch` (GPL-2.0) |
 
 Contribution candidates for filippor/cyan-skillfish-governor:
@@ -175,7 +176,7 @@ From the sources below; none verified on this board yet.
 
 - **SMU contention.** `cyan-skillfish-governor-smu` drives the same PCI index/data pair (`0xB8`/`0xBC` on `00:00.0`) as the 8-core unlock. Stop the governor before any SMU access, reads included. Restart after. `bc250-8core-unlock.service` is ordered `Before=` the governor for this reason.
 - **`bc250_detect.py` is not read-only.** It applies an SMU state and writes `overclock.conf` as a side effect. Never use it as a status check.
-- **Unknown core masks.** Stock mask at SMN `0x0115A870` is usually `0x77`, but boards reading `0xD7` exist. Refuse to act on any mask that isn't the expected value. Both packaged scripts refuse.
+- **Unknown core masks.** Stock mask at SMN `0x0115A870` is usually `0x77`, but boards reading `0xD7` exist. Refuse to act on any mask that isn't the expected value. Both packaged scripts refuse; the 8-core unit then fails (exit 1).
 - **Unlocks are volatile.** Cold boot reverts both the 8-core and 40 CU unlocks; warm reboot keeps them. Nothing is flashed, so pulling power is the rollback.
 - **One sensor driver.** In-kernel `nct6683` and out-of-tree `nct6687` conflict. Load one, blacklist the other.
 - **40 CU patch upstream is archived.** `duggasco/bc250-40cu-unlock` will not track new kernels; we carry the rebase in `src/bc250-amdgpu/`. When a kernel moves the hunk context, the OBS build fails at `%prep` until rebased. The KMP's `ksym()` requires pin it to one kernel build; by weak-modules2's design a newer kernel without a rebuilt KMP boots its own in-tree `amdgpu` (24 CU). Not observed yet.
