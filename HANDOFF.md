@@ -89,6 +89,12 @@ Performance, from the elektricm 40 CU page (duggasco A/B/A test, patched kernel,
 - **Graphics:** the page's only number is `glmark2` +4.4%, and it says graphics is not widely tested. glmark2 is CPU/driver-bound, so it understates gaming. YouTube game benchmarks (reported by the user, not linked) show about +30%.
 - **Thermals at 2 GHz, sustained:** CPU 100 °C (TJmax), PPT peak 220-230 W, GPU edge peak 107 °C, throttles within minutes. The page recommends 1500 MHz / 900 mV. Run the governor before unlocking.
 
+Measured on this board (reported by the user, 2026-10-25):
+
+| Benchmark | Config | Runs | Average |
+| --- | --- | --- | --- |
+| Unigine Superposition 1080p Extreme | Stock 24 CU, 6 cores, governor active, BIOS P3.00, kernel 7.3.0-1, Mesa 26.2.5 | 3164, 3190, 3191 | 3182 |
+
 ## Suspend
 
 Verified read-only on this board (2026-10-25); kernel logs were unreadable because the user is not in `systemd-journal`:
