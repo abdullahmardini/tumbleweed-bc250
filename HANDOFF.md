@@ -113,6 +113,7 @@ Verified on this board (2026-10-25, with `bc250-setup` installed):
 - hwmon: `nct6686` (via `nct6683`), `amdgpu`, `k10temp`, `nvme`.
 - **No CPU power.** `intel_rapl_msr` loads but `/sys/class/powercap` is empty, so there is no RAPL package or core domain.
 - **Only power reading is amdgpu PPT** (`power1_average`), which is the whole APU, CPU plus GPU. About 43-45 W idle, 64 W with a desktop open.
+- **High idle draw (shortcoming):** 43-45 W PPT at idle. Cause not measured; wall draw not yet compared.
 - **`nct6686` channels are unlabeled:** VIN0/1/2/6/7/16, fan1-5, pwm1-5, AMD TSI temp, Thermistors 14/15. No public mapping exists. A wall meter (Kill-A-Watt) can calibrate PPT against real draw.
 - `k10temp` gives Tctl only.
 
