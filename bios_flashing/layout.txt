@@ -1,0 +1,3 @@
+000000:01ffff nvram
+0ab0000:0abffff varstore
+0ae0000:0c2ffff dxe

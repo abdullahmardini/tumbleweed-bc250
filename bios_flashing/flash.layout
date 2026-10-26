@@ -1,0 +1,6 @@
+00000000:0001ffff nvram
+008e0000:008effff psp_dir
+00990000:009cffff psp_fw
+00ab0000:00abffff bios_dir
+00ae0000:00c2ffff dxe
+00eb0000:00efffff pei_data

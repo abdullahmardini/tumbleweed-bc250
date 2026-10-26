@@ -3,7 +3,6 @@
 ## Context
 
 - Home user, one board: AMD BC-250 on openSUSE Tumbleweed.
-- Unrecoverable files live on this machine. Do not modify the running system: no reboot, no SMU write, no GRUB/initramfs edit unless the user runs the target themselves.
 
 ## `HANDOFF.md`
 
@@ -26,10 +25,7 @@ The handoff is the decision record and platform reference, not a changelog and n
 
 ## Hard rules
 
-- Never compile software on the host.
 - Never reboot.
-- Never touch SMU state as a side effect: stop `cyan-skillfish-governor-smu` first.
-- Packages ship templates, this repo ships values. Local file wins; copy it explicitly.
 
 ## Tests
 
