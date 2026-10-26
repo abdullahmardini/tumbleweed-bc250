@@ -1,0 +1,9 @@
+<project name="home:superppl:bc250">
+  <title>AMD BC-250 on openSUSE Tumbleweed</title>
+  <description>Packages for running the AMD BC-250 board on Tumbleweed: GPU governor, umr, CU and core unlock scripts, ACPI tables, and the bc250-setup meta package.</description>
+  <person userid="superppl" role="maintainer"/>
+  <repository name="openSUSE_Tumbleweed">
+    <path project="openSUSE:Factory" repository="snapshot"/>
+    <arch>x86_64</arch>
+  </repository>
+</project>

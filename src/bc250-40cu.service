@@ -1,0 +1,14 @@
+[Unit]
+Description=Route GPU waves to all 40 CUs (BC-250)
+Documentation=https://elektricm.github.io/amd-bc250-docs/system/40cu-unlock/
+# 40 CUs at stock clocks overheat; never run without the governor's curve.
+Requires=cyan-skillfish-governor-smu.service
+After=cyan-skillfish-governor-smu.service sys-kernel-debug.mount
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bc250-40cu apply
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
