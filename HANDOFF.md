@@ -1,21 +1,21 @@
 # BC-250 handoff
 
-Status: all six packages built in `home:superppl:bc250` and installed from the `bc250` repo (2026-10-25 18:53). `bc250-amdgpu` (the 40 CU KMP) built 2026-10-26, not installed. BIOS is P3.00 Chipset Menu with a 512 MB VRAM split. 8 cores / 16 threads verified 2026-10-25 19:48.
+Status: packages built in `home:superppl:bc250` and installed from the `bc250` repo (2026-10-25 18:53). `bc250-40cu` retired 2026-10-26: `bc250-setup` 0.2.0 obsoletes it (host still has 0.1.0 until `zypper dup`). `bc250-amdgpu-kmp-default` r1 (mode off by default) is installed but not loaded yet (no reboot since); r2 enables mode 3. Governor `max = 1500`. BIOS is P3.00 Chipset Menu with a 512 MB VRAM split. 8 cores / 16 threads verified 2026-10-25 19:48.
 Goal: run the BC-250 on openSUSE Tumbleweed with packages built in the openSUSE Build Service (OBS), contributing upstream where AI contributions are accepted.
 
 ## Decision
 
 Option 3: a small OBS project plus one `bc250-setup` meta RPM. Setting up a host is `zypper ar` + `zypper in bc250-setup`; `zypper dup` keeps it current.
 
-- One package per piece: governor, `umr`, the 40 CU `amdgpu` KMP, ACPI tables, the 8-core script.
+- One package per piece: governor, `umr` (debug tool, nothing requires it), the 40 CU `amdgpu` KMP, ACPI tables, the 8-core script.
 - `bc250-setup` depends on them. It ships the sensor config, the suspend block and a systemd preset. Its only scriptlet is one `systemctl preset` on first install: the unit packages install first and preset their units before the preset file exists.
-- The preset enables the governor and the 8-core unit. The 40 CU unit stays disabled: the init-time KMP `bc250-amdgpu` supersedes the runtime route (see 40 CU). `bc250-setup` does not pull in the KMP. Installing the KMP enables 40 CU: it ships `options amdgpu bc250_cc_write_mode=3` in `/usr/lib/modprobe.d/50-bc250-40cu.conf`. The governor cap must be 1500 MHz before install (stock config here has `max = 1850`).
+- The preset enables the governor and the 8-core unit. `bc250-setup` does not pull in the KMP. `bc250-setup` 0.2.0 has `Obsoletes: bc250-40cu <= 0.1.0` and `Provides: bc250-40cu = 0.2.0`, so `zypper up`/`dup` removes the retired runtime package. Installing the KMP enables 40 CU: it ships `options amdgpu bc250_cc_write_mode=3` in `/usr/lib/modprobe.d/50-bc250-40cu.conf`. The governor cap must be 1500 MHz before install (stock config here has `max = 1850`).
 - Per-board values (voltage curve, CU layout) stay in this repo.
 
 Build order. Each step is usable on its own; finish one before starting the next.
 
 1. Governor RPM, installed with `zypper` and running.
-2. `umr` package and the 40 CU script, capped at 1500 MHz / 900 mV.
+2. `umr` package and the 40 CU KMP (`bc250-amdgpu`), governor capped at 1500 MHz / 900 mV.
 3. Sensor config, ACPI tables, `bc250-setup`.
 4. Package the 8-core script.
 5. Upstream contributions, after asking each maintainer about AI-assisted PRs.
@@ -29,7 +29,8 @@ Build order. Each step is usable on its own; finish one before starting the next
 | 4. Upstream-first (Factory, devel projects) | Slow review loops before anything runs. Deferred to step 5. |
 | 5. No RPMs, upstream tarballs and scripts | Nothing updates on its own. |
 | 40 CU via DKMS or a patched `kernel-default` | DKMS compiles on the host. A patched `kernel-default` in OBS means maintaining a kernel. Chosen instead: a KMP that rebuilds only `amdgpu` from `kernel-source` in OBS (`bc250-amdgpu`); OBS rebuilds it when the kernel changes. |
-| Shipping WinnieLV's live manager | No license. `bc250-40cu` in `src/` is our own script built from the published register values. |
+| Shipping WinnieLV's live manager | No license. |
+| Runtime 40 CU through `umr` (`bc250-40cu`, retired 2026-10-26) | `gfx_v10_0_get_cu_info()` reads `CC_GC_SHADER_ARRAY_CONFIG` only in hw_init and caches it in `adev->gfx.cu_info`, which the DEV_INFO ioctl (RADV) and KFD return (7.3.0-1.1: gfx_v10_0.c:5350/10090, amdgpu_kms.c:1010, kfd_crat.c:2304). Writes after init leave 24 CUs reported. duggasco's state 2 (SPI `0x1F`, stock enumeration) gave no gain. elektricm and WinnieLV call the runtime route working but publish no benchmark. The KMP does CC, SPI and RLC at init. |
 | Masking sleep targets from a package | `/etc` is admin territory. A `sleep.conf.d` drop-in in `/usr/lib` does the same and can be overridden. |
 
 ## The pieces
@@ -37,7 +38,7 @@ Build order. Each step is usable on its own; finish one before starting the next
 | Piece | What it is | Package |
 | --- | --- | --- |
 | Governor | GPU clocks and voltage, the main GPU power saving | `cyan-skillfish-governor-smu` |
-| 40 CU | CC/SPI/RLC writes in `amdgpu` init, behind `amdgpu.bc250_cc_write_mode=3` | `bc250-amdgpu-kmp-default`. The runtime route (`bc250-40cu` through `umr`) is superseded. |
+| 40 CU | CC/SPI/RLC writes in `amdgpu` init, behind `amdgpu.bc250_cc_write_mode=3` | `bc250-amdgpu-kmp-default` |
 | 8-core | SMU message `0x98` sets the core mask | `bc250-8core-unlock` |
 | Sensors | Reading only needs `options nct6683 force=1`. `nct6687` is only for software fan curves. | Config in `bc250-setup` |
 | Power | CPU idle and frequency states come from ACPI tables. The governor covers the GPU; its voltage curve is the undervolt. | `bc250-acpi-tables` |
@@ -48,11 +49,10 @@ Build order. Each step is usable on its own; finish one before starting the next
 | Package | Source | Notes |
 | --- | --- | --- |
 | `cyan-skillfish-governor-smu` | tag v0.4.14 (`7b08fdc`), crates vendored with `cargo_vendor` | 37 tests pass in `%check`. Carries `dbus-policy-scope-to-destination.patch` (below). rpmlint `dbus-file-unauthorized` stays until the SUSE security team whitelists the policy; that only matters for Factory. |
-| `umr` | `osc linkpac hardware umr` (1.0.11, MIT) | 1.0.11 has `cyan_skillfish.asic` and all three 40 CU registers in `gc_10_1_0.reg`. |
-| `bc250-40cu` | `src/bc250-40cu` and `src/bc250-40cu.service` | Unit `Requires=` the governor. |
+| `umr` | `osc linkpac hardware umr` (1.0.11, MIT) | 1.0.11 has `cyan_skillfish.asic` and all three 40 CU registers in `gc_10_1_0.reg`. Nothing requires it since `bc250-40cu` was retired; kept to read CC/SPI per SE/SH. |
 | `bc250-8core-unlock` | GabriWar commit `c532536`, script and LICENSE only, plus `bc250-8core-unlock-fail-on-refusal.patch` | The upstream tree also ships BIOS images, so the archive is not used. The patch makes `boot` exit 1 on every refusal and failure (unexpected mask, SMN read or mailbox error, unlock not taking) and refuses a 00:00.0 that is not `1022:13e0` before any register access. Our unit runs `boot` `Before=` the governor, ordering only (no `Requires=`): a failure shows in `systemctl --failed` and does not stop the governor. r2 (2026-10-26) built; exit codes tested against a fake `setpci` only. |
 | `bc250-acpi-tables` | e-tho/bc250-acpi-fix v1.1.1, built with `iasl` | Drop-in `/usr/lib/dracut/dracut.conf.d/50-bc250-acpi.conf` sets `acpi_override` and `acpi_table_dir`. `%regenerate_initrd_post` rebuilds the initrd; suse-module-tools' posttrans calls `sdbootutil` on systemd-boot, so no loader entry edits. Covers all 16 processor objects, so the same tables serve stock and unlocked boards (stock DSDT declares P000-P00F on BIOS 1.00-5.00; stock MADT marks the extra 4 disabled, per the lorek123 dump). `%check` fails the build if any P000-P00F lacks its methods (r2). mendesrr's 8-core fork is not used: no license, it publishes C3 (e-tho reverted C3 in `25b4153` for freezes), and its `_PSD` puts all CPUs in one domain. e-tho credits mendesrr's 8-core extension. |
-| `bc250-setup` | `src/bc250-setup/` | Preset logic verified offline with `systemctl --root`: governor and 8-core enabled, 40 CU disabled. |
+| `bc250-setup` | `src/bc250-setup/` | 0.2.0: preset enables the governor and 8-core; `Obsoletes`/`Provides` `bc250-40cu`. The offline `systemctl --root` preset check was done on 0.1.0. |
 | `bc250-amdgpu` → `bc250-amdgpu-kmp-default` | duggasco `ae7c30c` patch, rebased onto 7.3 in `src/bc250-amdgpu/`; `drivers/gpu/drm/amd` from `kernel-source` 7.3.0-1.1 | Builds only `amdgpu.ko` with `M=` against `linux-obj`, installs to `updates/` (depmod searches it first). `%prep` uses `patch --fuzz=0`, so a moved hunk fails the build; the unrebased patch fails with `Hunk #2 FAILED`. `%build` checks `modinfo` for the parameter and that vermagic is `7.3.0-1-default`. All 1156 `ksym()` requires match the installed `kernel-default` 7.3.0-1.1; firmware list (725) and `depends` equal the in-tree module. `-b` rebuilds the initrd on install. Module is unsigned (taints, loads: `MODULE_SIG_FORCE` off). Ships `/usr/lib/modprobe.d/50-bc250-40cu.conf` with mode 3 enabled; dracut `80base` copies `/usr/lib/modprobe.d/*.conf` into the initrd. |
 
 ## 8-core
@@ -81,9 +81,9 @@ Registers, per shader array (SE0-1 × SH0-1), from duggasco's technical report:
 
 **Route: the init-time patched module (`bc250-amdgpu`).** In the 7.3 source, `gfx_v10_0_get_cu_info()` is called from `gfx_v10_0_constants_init()` in `gfx_v10_0_hw_init()` (also run on resume and GPU reset). It reads `CC_GC_SHADER_ARRAY_CONFIG` there and caches the CU count and bitmaps that RADV and KFD see. The patch writes CC, SPI and RLC just before that read, so the writes are redone on every hw_init. duggasco's 4-state test shows SPI `0x1f` with stock enumeration gives no compute gain (302 → 302 tok/s); the 1.61× needs both. All published speedups use the patched module.
 
-**The runtime route (`bc250-40cu`) is superseded and likely ineffective.** It writes CC after init, which cannot change the cached topology (from the source above); the SPI write alone gave no gain in duggasco's test. Not measured on this board. The KMP must not be combined with `bc250-40cu apply`.
+The runtime route is rejected; see Rejected.
 
-The registers use debugfs MMIO, not the SMU mailbox, so the writes do not contend with the governor.
+The writes are MMIO from the driver, not the SMU mailbox, so they do not contend with the governor.
 
 Performance, from the elektricm 40 CU page (duggasco A/B/A test, patched kernel, stock cooler); not measured on this board:
 
@@ -185,8 +185,7 @@ From the sources below; none verified on this board yet.
 
 ## Open questions
 
-- Does `bc250-amdgpu` with `bc250_cc_write_mode=3` give 40 CU on this board? Check `modinfo -n amdgpu` (path in `updates/`), `cat /sys/module/amdgpu/parameters/bc250_cc_write_mode`, `sudo dmesg | grep -E 'bc250-40cu-enable|active_cu_number'` (per README: four lines `CC=0xfff80000->0xffe00000 SPI=0x00000007->0x0000001f`, and `active_cu_number 40`), `RADV_DEBUG=info vulkaninfo --summary 2>&1 | grep num_cu`, then Superposition against the stock 3182.
-- Does `umr -b <se> <sh> x -r '*.*.mmSPI_PG_ENABLE_STATIC_WGP_MASK'` resolve on this board, and what does its output look like? `bc250-40cu` parses the last hex word; only tested against a fake `umr`.
+- Does `bc250-amdgpu` with `bc250_cc_write_mode=3` give 40 CU on this board? Check `modinfo -n amdgpu` (path in `updates/`), `cat /sys/module/amdgpu/parameters/bc250_cc_write_mode`, `sudo dmesg | grep -E 'bc250-40cu-enable|active_cu_number'` (per README: four lines `CC=0xfff80000->0xffe00000 SPI=0x00000007->0x0000001f`, and `active_cu_number 40`), `RADV_DEBUG=info vulkaninfo --summary 2>&1 | grep num_cu`, then Superposition against the 8-core 3765.
 - Where does the 1500 MHz cap for 40 CU live? The governor's `/etc` config is `%config(noreplace)` and owned by the governor package.
 
 ## Sources

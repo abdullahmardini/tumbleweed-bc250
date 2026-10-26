@@ -1,4 +1,2 @@
 enable cyan-skillfish-governor-smu.service
 enable bc250-8core-unlock.service
-# Runtime 40 CU gain is unverified and needs a 1500 MHz governor cap first.
-disable bc250-40cu.service
