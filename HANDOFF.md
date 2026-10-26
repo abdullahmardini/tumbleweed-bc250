@@ -98,8 +98,9 @@ Measured on this board (reported by the user, 2026-10-25):
 | Unigine Superposition 1080p Extreme | Stock 24 CU, 6 cores, governor active, BIOS P3.00, kernel 7.3.0-1, Mesa 26.2.5 | 3164, 3190, 3191 | 3182 |
 | Unigine Superposition 1080p Extreme | 24 CU, 8 cores, governor active, fan curves changed by the user | 3775, 3787, 3733 | 3765 (+18%) |
 | Unigine Superposition 1080p Extreme | 40 CU, 8 cores, governor max 1500 MHz, fan curves changed | 4124, 4128, 4125 | 4126 (+30% vs stock, +10% vs 8-core) |
+| Unigine Superposition 1080p Extreme | 40 CU, 8 cores, governor 500-1850 MHz (930 mV safe point), fan curves changed, after a FurMark + s-tui heat soak | 4887, 4893, 4888 | 4889 (+54% vs stock, +18% vs 1500 MHz) |
 
-The +18% has two changes at once (8 cores and fan curves). The user believes the stock run did not throttle, but this is unverified: no clocks or temperatures were logged during either run. The 40 CU row also lowers the governor max from 1850 to 1500 MHz; the 8-core run was at 1850.
+The +18% has two changes at once (8 cores and fan curves). The user believes the stock run did not throttle, but this is unverified: no clocks or temperatures were logged during either run. The 40 CU row also lowers the governor max from 1850 to 1500 MHz; the 8-core run was at 1850. The 1850 MHz run logged no temperatures or clocks either, so whether it throttled (governor at 85 °C GPU edge, CPU at Tctl 100 °C) is unknown; the package keeps `max = 1500` until a logged run shows otherwise.
 
 ## Suspend
 
@@ -127,7 +128,7 @@ Verified on this board (2026-10-25, with `bc250-setup` installed):
 - **Only power reading is amdgpu PPT** (`power1_average`), which is the whole APU, CPU plus GPU. About 43-45 W idle, 64 W with a desktop open.
 - **High idle draw (shortcoming):** 43-45 W PPT at idle. Under light load (5-9% busy, a game running, 706 samples) the split is PPT 45 W = CPU rail 4 W + GFX 15 W (governor floor 1000 MHz / 800 mV) + 26 W rest (SoC, memory, display; not split further). `pp_dpm_mclk` and fclk have a single level, so memory never clocks down. A true-idle split is not done yet.
 - **Wall draw (Kill-A-Watt, user, 2026-10-25, 40 CU / 8 cores / 1500 MHz cap, stock cooler with user fan curves):** idle ~82 W. FurMark + s-tui stress: peak 250 W, settling to ~210 W as it throttles. FurMark alone: ~220 W. Idle wall minus idle PPT is ~37 W (PSU loss, fans, board, outside PPT); not split further. PSU: the user's 500 W Flex ATX.
-- **GPU idle floor (user, wall meter, 2026-10-25):** governor min 1000 → 500 MHz cuts idle wall draw ~82 → ~67 W with no stutter; 100 MHz is no better than 500. 60 Hz instead of 144 Hz saves ~2 W; the user keeps 144 Hz and VRR.
+- **GPU idle floor (user, wall meter, 2026-10-25):** governor min 1000 → 500 MHz cuts idle wall draw ~82 → ~67 W with no stutter; 100 MHz is no better than 500. Software at idle with min 500: PPT ~32 W (was ~41 W), GFX rail ~6 W (was ~15 W), CPU rail ~1 W. 60 Hz instead of 144 Hz saves ~2 W; the user keeps 144 Hz and VRR.
 - **All PCIe links have L1 ASPM off** (`link/l1_aspm` = 0 on GPU, NVMe, Realtek NIC; policy `default` defers to BIOS). `powersupersave` not tested; `r8169` disables ASPM on some Realtek chips.
 - mclk (450 MHz) and fclk have one DPM level. Changing them is firmware work; out of scope.
 - **`nct6686` channels are unlabeled:** VIN0/1/2/6/7/16, fan1-5, pwm1-5, AMD TSI temp, Thermistors 14/15. No public mapping exists. A logging wall meter could calibrate PPT against real draw over time.
