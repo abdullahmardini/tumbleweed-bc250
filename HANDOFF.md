@@ -119,11 +119,14 @@ Verified on this board (2026-10-25; journals read with the user in `systemd-jour
 Verified on this board (2026-10-25, with `bc250-setup` installed):
 
 - hwmon: `nct6686` (via `nct6683`), `amdgpu`, `k10temp`, `nvme`.
-- **No CPU power.** `intel_rapl_msr` loads but `/sys/class/powercap` is empty, so there is no RAPL package or core domain.
+- **No RAPL.** The CPU has the `rapl` flag, but the kernel logs `RAPL PMU: API unit is 2^-32 Joules, 0 fixed counters`; the `power`/`power_core` PMUs have no events and `/sys/class/powercap` is empty. So the energy counters (`0xc001029a/b`) fault or read 0 (*verify on host*: `sudo turbostat --quiet --interval 5 -n 3 --show CPU,Busy%,PkgWatt,CorWatt`).
+- **CPU rail power is in `gpu_metrics`** (format 2.2, 128 bytes, world-readable). `average_soc_power` (offset 0x2C) is SMU `Power[0]`, which the firmware header `smu11_driver_if_cyan_skillfish.h` labels VDDCR_VDD, the CPU core rail; `average_gfx_power` (0x2E) is VDDCR_GFX. Per-core power and temperature fields are invalid on the 8-core board. The governor bind-mounts a copy that patches only gfx activity (0x1C-0x1D). hwmon `vddnb` is the VDDCR_VDD voltage; hwmon `sclk` is wrong on 8-core boards (governor README).
+- Board PMICs per mothenjoyer69 `hardware.md`: ISL69247, ISL95712, ISL99360. The kernel's `isl68137` supports `isl69247`; whether its PMBus is reachable on the FCH SMBus is *verify on host*. No nct6686 channel is a 12 V input or current sense.
 - **Only power reading is amdgpu PPT** (`power1_average`), which is the whole APU, CPU plus GPU. About 43-45 W idle, 64 W with a desktop open.
-- **High idle draw (shortcoming):** 43-45 W PPT at idle. Cause not measured; wall draw not yet compared.
+- **High idle draw (shortcoming):** 43-45 W PPT at idle. Under light load (5-9% busy, a game running, 706 samples) the split is PPT 45 W = CPU rail 4 W + GFX 15 W (governor floor 1000 MHz / 800 mV) + 26 W rest (SoC, memory, display; not split further). `pp_dpm_mclk` and fclk have a single level, so memory never clocks down. A true-idle split and the wall comparison are not done yet.
 - **`nct6686` channels are unlabeled:** VIN0/1/2/6/7/16, fan1-5, pwm1-5, AMD TSI temp, Thermistors 14/15. No public mapping exists. A wall meter (Kill-A-Watt) can calibrate PPT against real draw.
 - `k10temp` gives Tctl only.
+- PCIe ASPM policy is `default`; L1 is off on the NVMe (03:00.0) and the RTL8111H (04:00.0).
 
 ## Host state (checked 2026-10-25, read-only, no SMU access)
 
@@ -204,6 +207,8 @@ From the sources below; none verified on this board yet.
 - https://www.skillfishos.com/en/docs/hardware-bc250/
 - https://github.com/lorek123/bc250-notes (DSDT dump)
 - https://github.com/fanoush/bc250_memcfg
+- https://github.com/mothenjoyer69/bc250-documentation/blob/main/hardware.md
+- https://github.com/torvalds/linux/blob/master/drivers/gpu/drm/amd/pm/swsmu/inc/pmfw_if/smu11_driver_if_cyan_skillfish.h
 - https://github.com/filippor/cyan-skillfish-governor (branch `smu`)
 - https://github.com/duggasco/bc250-40cu-unlock (archived; `docs/technical-report.md`)
 - https://github.com/WinnieLV/bc250-cu-live-manager
