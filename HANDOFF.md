@@ -1,6 +1,6 @@
 # BC-250 handoff
 
-Status: packages built in `home:superppl:bc250` and installed from the `bc250` repo (2026-10-25 18:53). `bc250-40cu` retired 2026-10-26 and removed from the host by `zypper dup` (`bc250-setup` 0.2.0). 40 CU verified 2026-10-25 21:19 with `bc250-amdgpu-kmp-default` r2: mode 3, four `bc250-40cu-enable` lines `CC=0xfff80000->0xffe00000 SPI=0x00000007->0x0000001f`, `active_cu_number 40`, RADV `num_cu = 40`. Governor `max = 1500`, active. BIOS is P3.00 Chipset Menu with a 512 MB VRAM split. 8 cores / 16 threads verified 2026-10-25 19:48.
+Status: packages built in `home:superppl:bc250` and installed from the `bc250` repo (2026-10-25 18:53). `bc250-40cu` retired 2026-10-26 and removed from the host by `zypper dup` (`bc250-setup` 0.2.0). 40 CU verified 2026-10-25 21:19 with `bc250-amdgpu-kmp-default` r2: mode 3, four `bc250-40cu-enable` lines `CC=0xfff80000->0xffe00000 SPI=0x00000007->0x0000001f`, `active_cu_number 40`, RADV `num_cu = 40`. Governor 500-1500 MHz, active. BIOS is P3.00 Chipset Menu with a 512 MB VRAM split. 8 cores / 16 threads verified 2026-10-25 19:48.
 Goal: run the BC-250 on openSUSE Tumbleweed with packages built in the openSUSE Build Service (OBS), contributing upstream where AI contributions are accepted.
 
 ## Decision
@@ -9,7 +9,7 @@ Option 3: a small OBS project plus one `bc250-setup` meta RPM. Setting up a host
 
 - One package per piece: governor, `umr` (debug tool, nothing requires it), the 40 CU `amdgpu` KMP, ACPI tables, the 8-core script.
 - `bc250-setup` depends on them. It ships the sensor config, the suspend block and a systemd preset. Its only scriptlet is one `systemctl preset` on first install: the unit packages install first and preset their units before the preset file exists.
-- The preset enables the governor and the 8-core unit. `bc250-setup` does not pull in the KMP. `bc250-setup` 0.2.0 has `Obsoletes: bc250-40cu <= 0.1.0` and `Provides: bc250-40cu = 0.2.0`, so `zypper up`/`dup` removes the retired runtime package. Installing the KMP enables 40 CU: it ships `options amdgpu bc250_cc_write_mode=3` in `/usr/lib/modprobe.d/50-bc250-40cu.conf`. The governor cap must be 1500 MHz before install (stock config here has `max = 1850`).
+- The preset enables the governor and the 8-core unit. `bc250-setup` does not pull in the KMP. `bc250-setup` 0.2.0 has `Obsoletes: bc250-40cu <= 0.1.0` and `Provides: bc250-40cu = 0.2.0`, so `zypper up`/`dup` removes the retired runtime package. Installing the KMP enables 40 CU: it ships `options amdgpu bc250_cc_write_mode=3` in `/usr/lib/modprobe.d/50-bc250-40cu.conf`. The governor package (r2) ships `min = 500`, `max = 1500` in its `%config(noreplace)` default (upstream: 1000-1850); its `%prep` fails if upstream changes those lines. An edited `/etc` config is kept and the new default lands as `.rpmnew`.
 - Per-board values (voltage curve, CU layout) stay in this repo.
 
 Build order. Each step is usable on its own; finish one before starting the next.
@@ -126,7 +126,10 @@ Verified on this board (2026-10-25, with `bc250-setup` installed):
 - Board PMICs per mothenjoyer69 `hardware.md`: ISL69247, ISL95712, ISL99360. The kernel's `isl68137` supports `isl69247`; whether its PMBus is reachable on the FCH SMBus is *verify on host*. No nct6686 channel is a 12 V input or current sense.
 - **Only power reading is amdgpu PPT** (`power1_average`), which is the whole APU, CPU plus GPU. About 43-45 W idle, 64 W with a desktop open.
 - **High idle draw (shortcoming):** 43-45 W PPT at idle. Under light load (5-9% busy, a game running, 706 samples) the split is PPT 45 W = CPU rail 4 W + GFX 15 W (governor floor 1000 MHz / 800 mV) + 26 W rest (SoC, memory, display; not split further). `pp_dpm_mclk` and fclk have a single level, so memory never clocks down. A true-idle split is not done yet.
-- **Wall draw (Kill-A-Watt, user, 2026-10-25, 40 CU / 8 cores / 1500 MHz cap, stock cooler with user fan curves):** idle ~82 W. FurMark + s-tui stress: peak 250 W, settling to ~210 W as it throttles. FurMark alone: ~220 W. Idle wall minus idle PPT is ~37 W (PSU loss, fans, board, outside PPT); not split further.
+- **Wall draw (Kill-A-Watt, user, 2026-10-25, 40 CU / 8 cores / 1500 MHz cap, stock cooler with user fan curves):** idle ~82 W. FurMark + s-tui stress: peak 250 W, settling to ~210 W as it throttles. FurMark alone: ~220 W. Idle wall minus idle PPT is ~37 W (PSU loss, fans, board, outside PPT); not split further. PSU: the user's 500 W Flex ATX.
+- **GPU idle floor (user, wall meter, 2026-10-25):** governor min 1000 → 500 MHz cuts idle wall draw ~82 → ~67 W with no stutter; 100 MHz is no better than 500. 60 Hz instead of 144 Hz saves ~2 W; the user keeps 144 Hz and VRR.
+- **All PCIe links have L1 ASPM off** (`link/l1_aspm` = 0 on GPU, NVMe, Realtek NIC; policy `default` defers to BIOS). `powersupersave` not tested; `r8169` disables ASPM on some Realtek chips.
+- mclk (450 MHz) and fclk have one DPM level. Changing them is firmware work; out of scope.
 - **`nct6686` channels are unlabeled:** VIN0/1/2/6/7/16, fan1-5, pwm1-5, AMD TSI temp, Thermistors 14/15. No public mapping exists. A logging wall meter could calibrate PPT against real draw over time.
 - `k10temp` gives Tctl only.
 - PCIe ASPM policy is `default`; L1 is off on the NVMe (03:00.0) and the RTL8111H (04:00.0).
@@ -194,7 +197,6 @@ From the sources below; none verified on this board yet.
 
 ## Open questions
 
-- Where does the 1500 MHz cap for 40 CU live? The governor's `/etc` config is `%config(noreplace)` and owned by the governor package.
 
 ## Sources
 
