@@ -1,6 +1,6 @@
 # BC-250 handoff
 
-Status: all six packages built in `home:superppl:bc250` and installed from the `bc250` repo (2026-10-25 18:53). `bc250-amdgpu` (the 40 CU KMP) built 2026-10-26, not installed. BIOS is P3.00 Chipset Menu with a 512 MB VRAM split. Still 6 cores after one soft reboot; see 8-core below.
+Status: all six packages built in `home:superppl:bc250` and installed from the `bc250` repo (2026-10-25 18:53). `bc250-amdgpu` (the 40 CU KMP) built 2026-10-26, not installed. BIOS is P3.00 Chipset Menu with a 512 MB VRAM split. 8 cores / 16 threads verified 2026-10-25 19:48.
 Goal: run the BC-250 on openSUSE Tumbleweed with packages built in the openSUSE Build Service (OBS), contributing upstream where AI contributions are accepted.
 
 ## Decision
@@ -56,6 +56,8 @@ Build order. Each step is usable on its own; finish one before starting the next
 | `bc250-amdgpu` → `bc250-amdgpu-kmp-default` | duggasco `ae7c30c` patch, rebased onto 7.3 in `src/bc250-amdgpu/`; `drivers/gpu/drm/amd` from `kernel-source` 7.3.0-1.1 | Builds only `amdgpu.ko` with `M=` against `linux-obj`, installs to `updates/` (depmod searches it first). `%prep` uses `patch --fuzz=0`, so a moved hunk fails the build; the unrebased patch fails with `Hunk #2 FAILED`. `%build` checks `modinfo` for the parameter and that vermagic is `7.3.0-1-default`. All 1156 `ksym()` requires match the installed `kernel-default` 7.3.0-1.1; firmware list (725) and `depends` equal the in-tree module. `-b` rebuilds the initrd on install. Module is unsigned (taints, loads: `MODULE_SIG_FORCE` off). Ships `bc250-40cu.conf` as a commented example in its docs, not in `modprobe.d`. |
 
 ## 8-core
+
+Verified 2026-10-25 19:48, after a warm reboot: `nproc` 16, `Core(s) per socket: 8`, unit logs `already unlocked (0xFF  enabled=[0 1 2 3 4 5 6 7] disabled=[])`. On this P3.00 board the mask accepted `0xFF` (not the `0x7D` case from issue #1).
 
 Checked 2026-10-25 19:02, read-only (no journal or SMN access):
 
@@ -122,7 +124,7 @@ Verified on this board (2026-10-25, with `bc250-setup` installed):
 - Bootloader is **systemd-boot** (`LOADER_TYPE="systemd-boot"`, `sdbootutil` present, no `grub2-mkconfig`). GRUB-based ACPI delivery does not apply.
 - Kernel `7.3.0-1-default`, root on LVM + btrfs snapshots, SELinux enabled on cmdline. `amdgpu` loaded; no `nct668x` module and no modprobe/modules-load config.
 - CPU family 23 model 71 (0x47); root complex `1022:13e0`.
-- 6 cores / 12 threads since the post-flash cold boot. The 8-core unlock worked on P2.00 (8 / 16 visible).
+- 8 cores / 16 threads after the `bc250-8core-unlock` warm reboot (2026-10-25 19:48). Also worked on P2.00.
 - GPU is `card1` (`1002:13fe`, `amdgpu`).
 - BIOS `P3.00` Chipset Menu (2021-12-09), flashed 2026-10-25 from `P2.00`. UMA Frame Buffer 512M, IOMMU disabled. `mem_info_vram_total` 512 MiB, 14 GiB RAM visible (was 8192 MiB / 7.5 GiB).
 - No `svm` flag in `/proc/cpuinfo` and no `/dev/kvm`: SVM is off in BIOS setup. Local `osc build` uses chroot via `sudo /usr/bin/build` (NOPASSWD in `/etc/sudoers.d/osc-build`).
@@ -179,7 +181,6 @@ From the sources below; none verified on this board yet.
 
 ## Open questions
 
-- What does `bc250-8core-unlock` log on P3.00: `mask set to 0xFF`, or `unexpected mask 0x..`? Read it with `sudo journalctl -b -u bc250-8core-unlock`. If the mask is `0x7D`, patch the script to accept it (allowlist `0x77`, `0x7D`, as PR #2 offers).
 - Does `bc250-amdgpu` with `bc250_cc_write_mode=3` give 40 CU on this board? Check `modinfo -n amdgpu` (path in `updates/`), `cat /sys/module/amdgpu/parameters/bc250_cc_write_mode`, `sudo dmesg | grep -E 'bc250-40cu-enable|active_cu_number'` (per README: four lines `CC=0xfff80000->0xffe00000 SPI=0x00000007->0x0000001f`, and `active_cu_number 40`), `RADV_DEBUG=info vulkaninfo --summary 2>&1 | grep num_cu`, then Superposition against the stock 3182.
 - Does `umr -b <se> <sh> x -r '*.*.mmSPI_PG_ENABLE_STATIC_WGP_MASK'` resolve on this board, and what does its output look like? `bc250-40cu` parses the last hex word; only tested against a fake `umr`.
 - Where does the 1500 MHz cap for 40 CU live? The governor's `/etc` config is `%config(noreplace)` and owned by the governor package.
