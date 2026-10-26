@@ -9,7 +9,7 @@ Option 3: a small OBS project plus one `bc250-setup` meta RPM. Setting up a host
 
 - One package per piece: governor, `umr`, the 40 CU `amdgpu` KMP, ACPI tables, the 8-core script.
 - `bc250-setup` depends on them. It ships the sensor config, the suspend block and a systemd preset. Its only scriptlet is one `systemctl preset` on first install: the unit packages install first and preset their units before the preset file exists.
-- The preset enables the governor and the 8-core unit. The 40 CU unit stays disabled: the init-time KMP `bc250-amdgpu` supersedes the runtime route (see 40 CU). `bc250-setup` does not pull in the KMP; installing it and setting the module option are deliberate steps.
+- The preset enables the governor and the 8-core unit. The 40 CU unit stays disabled: the init-time KMP `bc250-amdgpu` supersedes the runtime route (see 40 CU). `bc250-setup` does not pull in the KMP. Installing the KMP enables 40 CU: it ships `options amdgpu bc250_cc_write_mode=3` in `/usr/lib/modprobe.d/50-bc250-40cu.conf`. The governor cap must be 1500 MHz before install (stock config here has `max = 1850`).
 - Per-board values (voltage curve, CU layout) stay in this repo.
 
 Build order. Each step is usable on its own; finish one before starting the next.
@@ -53,7 +53,7 @@ Build order. Each step is usable on its own; finish one before starting the next
 | `bc250-8core-unlock` | GabriWar commit `c532536`, script and LICENSE only | The upstream tree also ships BIOS images, so the archive is not used. Our unit runs `boot` `Before=` the governor. |
 | `bc250-acpi-tables` | e-tho/bc250-acpi-fix v1.1.1, built with `iasl` | Drop-in `/usr/lib/dracut/dracut.conf.d/50-bc250-acpi.conf` sets `acpi_override` and `acpi_table_dir`. `%regenerate_initrd_post` rebuilds the initrd; suse-module-tools' posttrans calls `sdbootutil` on systemd-boot, so no loader entry edits. |
 | `bc250-setup` | `src/bc250-setup/` | Preset logic verified offline with `systemctl --root`: governor and 8-core enabled, 40 CU disabled. |
-| `bc250-amdgpu` → `bc250-amdgpu-kmp-default` | duggasco `ae7c30c` patch, rebased onto 7.3 in `src/bc250-amdgpu/`; `drivers/gpu/drm/amd` from `kernel-source` 7.3.0-1.1 | Builds only `amdgpu.ko` with `M=` against `linux-obj`, installs to `updates/` (depmod searches it first). `%prep` uses `patch --fuzz=0`, so a moved hunk fails the build; the unrebased patch fails with `Hunk #2 FAILED`. `%build` checks `modinfo` for the parameter and that vermagic is `7.3.0-1-default`. All 1156 `ksym()` requires match the installed `kernel-default` 7.3.0-1.1; firmware list (725) and `depends` equal the in-tree module. `-b` rebuilds the initrd on install. Module is unsigned (taints, loads: `MODULE_SIG_FORCE` off). Ships `bc250-40cu.conf` as a commented example in its docs, not in `modprobe.d`. |
+| `bc250-amdgpu` → `bc250-amdgpu-kmp-default` | duggasco `ae7c30c` patch, rebased onto 7.3 in `src/bc250-amdgpu/`; `drivers/gpu/drm/amd` from `kernel-source` 7.3.0-1.1 | Builds only `amdgpu.ko` with `M=` against `linux-obj`, installs to `updates/` (depmod searches it first). `%prep` uses `patch --fuzz=0`, so a moved hunk fails the build; the unrebased patch fails with `Hunk #2 FAILED`. `%build` checks `modinfo` for the parameter and that vermagic is `7.3.0-1-default`. All 1156 `ksym()` requires match the installed `kernel-default` 7.3.0-1.1; firmware list (725) and `depends` equal the in-tree module. `-b` rebuilds the initrd on install. Module is unsigned (taints, loads: `MODULE_SIG_FORCE` off). Ships `/usr/lib/modprobe.d/50-bc250-40cu.conf` with mode 3 enabled; dracut `80base` copies `/usr/lib/modprobe.d/*.conf` into the initrd. |
 
 ## 8-core
 
@@ -152,7 +152,7 @@ No project below publishes a contributing guide or AI policy. openSUSE has no AI
 | tomstdenis/umr | MIT (`LICENSE`, AMD 2017) |
 | WinnieLV/bc250-cu-live-manager | **none**: not redistributable, cannot ship in OBS as-is |
 | duggasco/bc250-40cu-unlock | GPL-2.0 (README; no `LICENSE` file). The patch carries `Signed-off-by` against GPL-2.0 kernel code. |
-| this repo | MIT (`LICENSE`), except `src/bc250-amdgpu/bc250-40cu-amdgpu.patch` (GPL-2.0) |
+| this repo | MIT (`LICENSE`, confirmed by the user 2026-10-25), except `src/bc250-amdgpu/bc250-40cu-amdgpu.patch` (GPL-2.0) |
 
 Contribution candidates for filippor/cyan-skillfish-governor:
 
@@ -179,7 +179,7 @@ From the sources below; none verified on this board yet.
 - **Unlocks are volatile.** Cold boot reverts both the 8-core and 40 CU unlocks; warm reboot keeps them. Nothing is flashed, so pulling power is the rollback.
 - **One sensor driver.** In-kernel `nct6683` and out-of-tree `nct6687` conflict. Load one, blacklist the other.
 - **40 CU patch upstream is archived.** `duggasco/bc250-40cu-unlock` will not track new kernels; we carry the rebase in `src/bc250-amdgpu/`. When a kernel moves the hunk context, the OBS build fails at `%prep` until rebased. The KMP's `ksym()` requires pin it to one kernel build; by weak-modules2's design a newer kernel without a rebuilt KMP boots its own in-tree `amdgpu` (24 CU). Not observed yet.
-- **40 CU loads from the initrd.** `plymouth` is installed, so dracut's `drm` module puts `amdgpu` in the initrd (initrd is root-only, contents not checked). `/etc/modprobe.d` is copied into the initrd: after adding or removing the option, run `sudo dracut -f --regenerate-all`. Rollback: remove the option, regenerate, reboot; or `zypper rm bc250-amdgpu-kmp-default`, which rebuilds the initrd.
+- **40 CU loads from the initrd.** `plymouth` is installed, so dracut's `drm` module puts `amdgpu` in the initrd (initrd is root-only, contents not checked). Install and removal rebuild the initrd (`-b`). Rollback without removing: `/etc/modprobe.d/50-bc250-40cu.conf` with `options amdgpu bc250_cc_write_mode=0` (same name overrides the vendor file), `sudo dracut -f --regenerate-all`, reboot. One-off: add `amdgpu.bc250_cc_write_mode=0` to the cmdline in the systemd-boot editor. Or `zypper rm bc250-amdgpu-kmp-default`.
 - **ACPI tables load from the initrd.** If a table breaks boot, pick an older entry or snapshot in systemd-boot, then remove `bc250-acpi-tables`.
 
 ## Open questions
