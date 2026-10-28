@@ -147,7 +147,7 @@ Verified on this board (2026-10-25, with `bc250-setup` installed):
 - `k10temp` gives Tctl only.
 - **Software fan control works with `nct6687`** (2026-10-28, local build of `bc250-nct6687`): fan2 is the cooling fan. BIOS curve at idle: `pwm2_enable` 2, PWM 178, ~1500 rpm. Manual PWM 255 → 1960 rpm, 77 → 952 rpm. Writing `pwm2_enable=2` or unloading the module returns it to PWM 178. The fan is an Arctic P12 (not Max), so ~1960 rpm is its ceiling. The log line `force=1 refused: chip ID 0xffff` is the empty second Super I/O probe at `0x4e`; the chip is at `0x2e`.
 
-## Host state (checked 2026-10-25, read-only, no SMU access)
+## Host state (checked 2026-10-25, updated 2026-10-28)
 
 - Bootloader is **systemd-boot** (`LOADER_TYPE="systemd-boot"`, `sdbootutil` present, no `grub2-mkconfig`). GRUB-based ACPI delivery does not apply.
 - Kernel `7.3.0-1-default`, root on LVM + btrfs snapshots, SELinux enabled on cmdline. `amdgpu` loaded; no `nct668x` module and no modprobe/modules-load config.
@@ -155,12 +155,14 @@ Verified on this board (2026-10-25, with `bc250-setup` installed):
 - 8 cores / 16 threads after the `bc250-8core-unlock` warm reboot (2026-10-25 19:48). Also worked on P2.00.
 - GPU is `card1` (`1002:13fe`, `amdgpu`).
 - BIOS `P3.00` Chipset Menu (2021-12-09), flashed 2026-10-25 from `P2.00`. UMA Frame Buffer 512M, IOMMU disabled. `mem_info_vram_total` 512 MiB, 14 GiB RAM visible (was 8192 MiB / 7.5 GiB).
-- SVM was enabled in BIOS setup 2026-10-25; the jumper CMOS clear reset it to off (2026-10-27: no `svm` flag, no `/dev/kvm`). Re-enable in BIOS setup. IOMMU off (`/sys/class/iommu` empty). Local `osc build` uses chroot via `sudo /usr/bin/build` (NOPASSWD in `/etc/sudoers.d/osc-build`).
+- SVM is enabled in BIOS setup (`svm` flag and `/dev/kvm` present, 2026-10-28; the 2026-10-27 CMOS clear had turned it off). IOMMU off (`/sys/class/iommu` empty). Local `osc build` uses chroot via `sudo /usr/bin/build` (NOPASSWD in `/etc/sudoers.d/osc-build`).
 - `fwupdmgr get-devices` lists no system firmware device (only CPU, GPU, NVMe). The board has no UEFI capsule update path, so `fwupdmgr` cannot flash its BIOS.
 - `CONFIG_ACPI_TABLE_UPGRADE=y`, `CONFIG_DEBUG_FS=y` and mounted, `MODULE_SIG_FORCE` not set. Secure Boot disabled (firmware reports unsupported). Lockdown `none`.
 - Stock firmware exposes no `cpuidle` or `cpufreq`. With `bc250-acpi-tables` installed, all 16 CPUs have `acpi_idle` (POLL/C1/C2) and `acpi-cpufreq` (2026-10-25).
 - Before `bc250-setup`: hwmon showed `nvme`, `amdgpu`, `k10temp` only. See Sensors for the current state.
 - Not installed: `sensors`, `coolercontrol`. `osc` is installed and authenticated (keyring).
+- Added 2026-10-28 for the memory-profile test: `clpeak`, `Mesa-libRusticlOpenCL`, `libOpenCL1`, `libclc` (zypper), and a root-owned copy of `memprofile-step2-static.sh` at `/usr/local/sbin/bc250-memprofile-step2` (systemd cannot exec from `/home`). Logs: `/var/log/bc250-vramtemp/`, `/var/log/bc250-memprofile-soak.log`. pan-Rijovich's checkout: `~/Code/bc-250-community-repos/bc250-memory-temperature` at `4a2221d`.
+- `/etc/sudoers.d/claude-bc250-temp` grants the agent sudo for testing; remove it when done.
 - In OSS: `osc 1.28.0`, `obs-service-cargo 7.2.2`, `cargo-packaging 1.5.0`, `coolercontrol 4.3.1`. `umr` only in the `hardware` devel project. Not in OSS: `nct6687`.
 
 ## Upstream licenses and AI policy
@@ -213,10 +215,10 @@ From the sources below; none verified on this board yet.
 - VRAM temperature: make it continuous? Needs one reader at a time on the Queue 3 mailbox, kept clear of the governor's startup messages (Control Center's rule: none within 5 s of a governor start). Package a reader service, or use Control Center? Does the reading hold under GPU load?
 - Memory/fabric profile: profile 2 is set this boot; an 8 h soak (transient unit `bc250-memprofile-soak`, `/var/log/bc250-memprofile-soak.log`) started 2026-10-28 10:02. Open: wall-meter reading at profile 2 vs ~67 W; clpeak bandwidth after the next cold boot (profile 3) to confirm the drop to 190 GB/s; whether a warm reboot keeps profile 2; then whether to package a one-shot boot unit.
 - ASPM: persist a policy? NIC L1 showed no PPT change and no errors; NVMe L1 is already on under `powersupersave`, L1SS is impossible on `00:15.0`. Only the wall meter can show a gain. With no L1SS on any link here, `powersave` (L0s+L1) and `powersupersave` (adds L1SS) should behave the same.
-- GPU clock gating: does an opt-in GFX CGCG patch (`amdgpu.bc250_cg=1|2`, default 0, built in a scratch VM, never booted) cut idle PPT and stay stable? AMD says the chip has no CG support; expected gain is small. Low priority.
+- GPU clock gating: does an opt-in GFX CGCG patch (`amdgpu.bc250_cg=1|2`, default 0, `discovery/clock-gating/`, built locally, never booted) cut idle PPT and stay stable? AMD says the chip has no CG support; expected gain is small. Low priority.
 - 8-core telemetry patch: ship it in `bc250-amdgpu`? Needs a full KMP build (amdgpu builds need `--vm-memory=3072 --vm-disk-size=16384 --jobs=4`), a live check of `pp_dpm_sclk`/hwmon `sclk`, and the patch's license.
 - Fan curves: switch `bc250-setup` from `nct6683` to `nct6687` and pick a curve tool (CoolerControl is in OSS)?
-- Telemetry logger: publish `bc250-telemetry-log` (CSV every 10 s to `/var/log/bc250`, reads only the governor's `gpu_metrics` copy, built in a scratch VM, 32 tests pass)? Unchecked: whether the governor's bind mount reaches its sandbox.
+- Telemetry logger: publish `bc250-telemetry-log` (CSV every 10 s to `/var/log/bc250`, reads only the governor's `gpu_metrics` copy, `src/bc250-telemetry-log/`, built locally, 32 tests pass)? Unchecked: whether the governor's bind mount reaches its sandbox.
 
 ## Sources
 
