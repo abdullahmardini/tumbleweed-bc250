@@ -1,0 +1,55 @@
+[Unit]
+Description=Log BC-250 temperatures, power, clocks and fans to /var/log/bc250
+# The governor bind-mounts its copy of gpu_metrics at start; the logger reads
+# gpu_metrics only through that copy. The sensor module loads in
+# systemd-modules-load (bc250-setup), before the hwmon scan at start.
+After=cyan-skillfish-governor-smu.service systemd-modules-load.service
+
+[Service]
+# A long-running loop: one process and one sleep per row. A timer would set
+# up a sandboxed unit and log start/stop lines every 10 s.
+Type=exec
+ExecStart=/usr/bin/bc250-telemetry-log
+Restart=on-failure
+RestartSec=30
+Nice=10
+# A dedicated user, not DynamicUser: DynamicUser puts LogsDirectory under
+# /var/log/private (mode 0700), so only root could read the CSV files.
+User=bc250-telemetry
+Group=bc250-telemetry
+LogsDirectory=bc250
+LogsDirectoryMode=0755
+UMask=0022
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+DevicePolicy=closed
+PrivateNetwork=yes
+PrivateIPC=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+# Needs /proc/self/mountinfo and /proc/uptime, so no ProcSubset=pid.
+ProtectProc=invisible
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+KeyringMode=private
+RemoveIPC=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,66 @@
+--- a/drivers/gpu/drm/amd/amdgpu/gfx_v10_0.c
++++ b/drivers/gpu/drm/amd/amdgpu/gfx_v10_0.c
+@@ -8290,7 +8290,11 @@
+ 		    (amdgpu_ip_version(adev, GC_HWIP, 0) ==
+ 		     IP_VERSION(10, 1, 1)) ||
+ 		    (amdgpu_ip_version(adev, GC_HWIP, 0) ==
+-		     IP_VERSION(10, 1, 2)))
++		     IP_VERSION(10, 1, 2)) ||
++		    /* BC-250: same Navi1x MGCG workaround when MGCG is opted in */
++		    ((amdgpu_ip_version(adev, GC_HWIP, 0) ==
++		      IP_VERSION(10, 1, 3)) &&
++		     (adev->cg_flags & AMD_CG_SUPPORT_GFX_MGCG)))
+ 			gfx_v10_0_apply_medium_grain_clock_gating_workaround(adev);
+ 	} else {
+ 		/* CGCG/CGLS should be disabled before MGCG/MGLS
+@@ -8502,6 +8506,7 @@
+ 	case IP_VERSION(10, 1, 10):
+ 	case IP_VERSION(10, 1, 1):
+ 	case IP_VERSION(10, 1, 2):
++	case IP_VERSION(10, 1, 3):
+ 	case IP_VERSION(10, 3, 0):
+ 	case IP_VERSION(10, 3, 2):
+ 	case IP_VERSION(10, 3, 1):
+--- a/drivers/gpu/drm/amd/amdgpu/nv.c
++++ b/drivers/gpu/drm/amd/amdgpu/nv.c
+@@ -27,6 +27,20 @@
+ 
+ #include <drm/amdgpu_drm.h>
+ 
++/*
++ * BC-250 experiment: opt-in GFX clock gating on Cyan Skillfish 1002:13fe.
++ * Upstream sets cg_flags = 0 for GC 10.1.3 (b515937b414a) and AMD states
++ * the part "doesn't support any CG features" (bca52455a3c0), so this is
++ * unvalidated by AMD. Off by default: the module then behaves like stock.
++ */
++static int bc250_cg;
++module_param(bc250_cg, int, 0444);
++MODULE_PARM_DESC(bc250_cg,
++	"BC-250 GFX clock gating: 0=off (stock) 1=CGCG 2=MGCG+CGCG (Navi10 GFX set)");
++#define BC250_CG_PCI_DEVICE_ID 0x13FE
++#define BC250_CG_MODE_CGCG 1
++#define BC250_CG_MODE_MGCG_CGCG 2
++
+ #include "amdgpu.h"
+ #include "amdgpu_atombios.h"
+ #include "amdgpu_ih.h"
+@@ -829,6 +843,19 @@
+ 	case IP_VERSION(10, 1, 4):
+ 		adev->cg_flags = 0;
+ 		adev->pg_flags = 0;
++		/* GFX flags only: HDP/IH/MC/BIF CG are not touched (NBIO 2.1.1 is
++		 * not handled by nv_common_set_clockgating_state anyway), and no
++		 * PG flag, because the RLC firmware has no save/restore list. */
++		if (adev->pdev->device == BC250_CG_PCI_DEVICE_ID) {
++			if (bc250_cg == BC250_CG_MODE_CGCG)
++				adev->cg_flags = AMD_CG_SUPPORT_GFX_CGCG;
++			else if (bc250_cg == BC250_CG_MODE_MGCG_CGCG)
++				adev->cg_flags = AMD_CG_SUPPORT_GFX_MGCG |
++						 AMD_CG_SUPPORT_GFX_CGCG;
++			if (adev->cg_flags)
++				dev_info(adev->dev, "bc250-cg: mode=%d cg_flags=0x%llx\n",
++					 bc250_cg, adev->cg_flags);
++		}
+ 		adev->external_rev_id = adev->rev_id + 0x82;
+ 		break;
+ 	case IP_VERSION(10, 3, 6):

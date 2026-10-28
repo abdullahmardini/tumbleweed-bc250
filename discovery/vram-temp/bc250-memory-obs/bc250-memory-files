@@ -1,0 +1,3 @@
+%defattr (-,root,root)
+%{kernel_module_directory}/%2-%1
+%{_modprobedir}/50-bc250-memory.conf

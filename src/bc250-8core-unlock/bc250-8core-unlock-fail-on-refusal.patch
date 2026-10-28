@@ -1,0 +1,171 @@
+--- a/bc250-8core-unlock.sh
++++ b/bc250-8core-unlock.sh
+@@ -27,9 +27,17 @@
+ #
+ # Usage:  bc250-8core-unlock.sh {status|apply|boot|install|uninstall}
+ #
++# Exit status: apply and boot exit 0 only when the mask reads 0xFF afterwards
++# (already, or just set); status exits 0 when it could read the mask. Anything
++# else -- a refusal, a failed read or write, a rejected unlock -- is 1, so the
++# systemd unit shows up as failed instead of silently staying at 6 cores.
++#
+ set -uo pipefail
+ 
+ DEV=00:00.0
++# 0xB8/0xBC is the SMN pair on every AMD Zen root complex, but the mask
++# register and message 0x98 are only known on the BC-250's (Cyan Skillfish).
++BC250_ROOT_COMPLEX=1022:13e0
+ IDX=0xB8                      # SMN address register
+ DAT=0xBC                      # SMN data register
+ 
+@@ -56,6 +64,13 @@
+     command -v setpci >/dev/null || die "setpci not found (install pciutils)"
+     [ -e "/sys/bus/pci/devices/0000:$DEV/config" ] \
+         || die "PCI device $DEV not found -- is this a BC-250?"
++    local vendor device
++    vendor=$(cat "/sys/bus/pci/devices/0000:$DEV/vendor") \
++        || die "cannot read the vendor ID of $DEV"
++    device=$(cat "/sys/bus/pci/devices/0000:$DEV/device") \
++        || die "cannot read the device ID of $DEV"
++    [ "${vendor#0x}:${device#0x}" = "$BC250_ROOT_COMPLEX" ] \
++        || die "$DEV is ${vendor#0x}:${device#0x}, not the BC-250 root complex $BC250_ROOT_COMPLEX -- not touching anything"
+ }
+ 
+ # ---------------------------------------------------------------------------
+@@ -68,19 +83,33 @@
+ # inside setpci rather than several process spawns.
+ # ---------------------------------------------------------------------------
+ 
++# setpci's own error goes to the log: a failed access now aborts the command,
++# and the reason is what tells a read-protected bus from a wrong device.
+ smn_read() {                                  # $1 = hex addr (no 0x)
+-    setpci -s "$DEV" "$IDX.L=$1" 2>/dev/null
+-    setpci -s "$DEV" "$DAT.L"    2>/dev/null
++    setpci -s "$DEV" "$IDX.L=$1" || return 1
++    setpci -s "$DEV" "$DAT.L"
+ }
+ 
+-save_index()    { setpci -s "$DEV" "$IDX.L" 2>/dev/null; }
+-restore_index() { setpci -s "$DEV" "$IDX.L=$1" 2>/dev/null; }
++save_index()    { setpci -s "$DEV" "$IDX.L"; }
++# amdgpu and the governor set the index before every access, so a stale index
++# is untidy, not dangerous: warn instead of failing an otherwise good run.
++restore_index() {
++    setpci -s "$DEV" "$IDX.L=$1" \
++        || echo "warning: could not restore SMN index register to $1" >&2
++}
+ 
+ hex2dec() { printf '%d' "0x${1#0x}" 2>/dev/null || echo 0; }
+ 
++# A failed or garbled read must not turn into mask 0 (or any other number):
++# 0 would be reported as an "unexpected mask" and hide the real fault.
+ read_mask() {                                  # -> decimal 0..255
+-    local v; v=$(smn_read "$MASK_REG")
+-    echo $(( $(hex2dec "$v") & 0xff ))
++    local v
++    v=$(smn_read "$MASK_REG") || return 1
++    if ! [[ $v =~ ^[0-9a-fA-F]{8}$ ]]; then
++        echo "error: SMN 0x$MASK_REG read returned '$v', not a 32-bit hex value" >&2
++        return 1
++    fi
++    echo $(( 0x$v & 0xff ))
+ }
+ 
+ describe() {                                   # $1 = decimal mask
+@@ -97,12 +126,13 @@
+         "$IDX.L=$RSP_REG"  "$DAT.L=00000000" \
+         "$IDX.L=$ARG0_REG" "$DAT.L=$MASK_REG" \
+         "$IDX.L=$ARG1_REG" "$DAT.L=00000000" \
+-        "$IDX.L=$MSG_REG"  "$DAT.L=000000$MSG_UNLOCK" 2>/dev/null
++        "$IDX.L=$MSG_REG"  "$DAT.L=000000$MSG_UNLOCK" || return 1
+ 
+     # poll response: done on 1 (ok) or 0xFC..0xFF (error codes)
+-    local i resp
++    local i raw resp
+     for i in $(seq 1 200); do
+-        resp=$(hex2dec "$(smn_read "$RSP_REG")")
++        raw=$(smn_read "$RSP_REG") || return 1
++        resp=$(hex2dec "$raw")
+         if [ "$resp" -eq 1 ] || { [ "$resp" -ge 252 ] && [ "$resp" -le 255 ]; }; then
+             break
+         fi
+@@ -126,8 +156,10 @@
+ cmd_status() {
+     need_tools
+     local saved mask cores
+-    saved=$(save_index)
+-    mask=$(read_mask)
++    saved=$(save_index) || die "cannot read the SMN index register"
++    if ! mask=$(read_mask); then
++        restore_index "$saved"; die "cannot read the core mask"
++    fi
+     restore_index "$saved"
+ 
+     echo "SMN 0x$MASK_REG = $(describe "$mask")"
+@@ -147,8 +179,10 @@
+ cmd_apply() {
+     need_tools
+     local saved before resp after
+-    saved=$(save_index)
+-    before=$(read_mask)
++    saved=$(save_index) || die "cannot read the SMN index register"
++    if ! before=$(read_mask); then
++        restore_index "$saved"; die "cannot read the core mask"
++    fi
+     echo "before: $(describe "$before")"
+ 
+     if [ "$before" -eq $((UNLOCKED_MASK)) ]; then
+@@ -159,8 +193,12 @@
+         die "refusing: unexpected mask $(printf '0x%02X' "$before") (expected 0x77)"
+     fi
+ 
+-    resp=$(send_unlock)
+-    after=$(read_mask)
++    if ! resp=$(send_unlock); then
++        restore_index "$saved"; die "SMU mailbox access failed -- check the mask with 'status'"
++    fi
++    if ! after=$(read_mask); then
++        restore_index "$saved"; die "cannot read the core mask after the unlock"
++    fi
+     restore_index "$saved"
+ 
+     if [ "$resp" -eq 1 ]; then
+@@ -200,8 +238,10 @@
+ cmd_boot() {
+     need_tools
+     local saved mask resp after
+-    saved=$(save_index)
+-    mask=$(read_mask)
++    saved=$(save_index) || die "cannot read the SMN index register, not touching anything"
++    if ! mask=$(read_mask); then
++        restore_index "$saved"; die "cannot read the core mask, not touching anything"
++    fi
+ 
+     if [ "$mask" -eq $((UNLOCKED_MASK)) ]; then
+         restore_index "$saved"
+@@ -209,17 +249,19 @@
+     fi
+     if [ "$mask" -ne $((STOCK_MASK)) ]; then
+         restore_index "$saved"
+-        echo "unexpected mask $(printf '0x%02X' "$mask"), not touching anything" >&2
+-        return 0
++        die "unexpected mask $(describe "$mask") (expected 0x77), not touching anything"
+     fi
+ 
+-    resp=$(send_unlock)
+-    after=$(read_mask)
++    if ! resp=$(send_unlock); then
++        restore_index "$saved"; die "SMU mailbox access failed -- check the mask with 'status'"
++    fi
++    if ! after=$(read_mask); then
++        restore_index "$saved"; die "cannot read the core mask after the unlock"
++    fi
+     restore_index "$saved"
+ 
+     if [ "$after" -ne $((UNLOCKED_MASK)) ]; then
+-        echo "unlock failed (SMU response $(printf '0x%x' "$resp")) -- staying at 6 cores" >&2
+-        return 0
++        die "unlock failed (SMU response $(printf '0x%x' "$resp"), mask $(describe "$after")) -- staying at 6 cores"
+     fi
+     echo "mask set to 0xFF -- all 8 cores will appear on your next reboot"
+ }

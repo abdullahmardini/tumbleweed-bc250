@@ -1,0 +1,9 @@
+-------------------------------------------------------------------
+Wed Oct 28 07:30:00 UTC 2026 - abdullah mardini <superppl@gmail.com>
+
+- Initial package of bc250-telemetry-log 0.1.0
+  * CSV row every 10 s to /var/log/bc250, one file per day,
+    45 days / 128 MiB cap
+  * amdgpu data only from the governor's gpu_metrics copy; SMU-backed
+    sysfs reads behind BC250_TELEMETRY_SMU_READS=1
+  * Dedicated bc250-telemetry user, sandboxed service, not enabled

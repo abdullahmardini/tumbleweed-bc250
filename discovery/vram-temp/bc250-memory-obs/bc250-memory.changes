@@ -1,0 +1,8 @@
+-------------------------------------------------------------------
+Wed Oct 28 06:40:00 UTC 2026 - abdullah mardini <superppl@gmail.com>
+
+- Initial package: bc250_memory KMP from Hexxeh/bc250-memory-dkms
+  de4740c, GDDR6 VRAM temperature hwmon driver for the BC-250
+- No autoload (no module alias); modprobe.d sets auto_patch=0 so a
+  plain load is inert. Requires an SMU-unlocked BIOS (or a prior
+  runtime unlock) and manual coordination with the GPU governor.

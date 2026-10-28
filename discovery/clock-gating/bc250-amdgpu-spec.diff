@@ -1,0 +1,28 @@
+--- bc250-amdgpu.spec	2026-10-25 20:10:51.506855020 -0700
++++ bc250-amdgpu.spec	2026-10-28 00:07:11.060078374 -0700
+@@ -21,6 +21,8 @@
+ Source1:        bc250-40cu.conf
+ Source2:        %{name}-files
+ Source3:        %{name}-preamble
++# Opt-in GFX clock gating (amdgpu.bc250_cg, default 0 = stock). Experimental.
++Source4:        bc250-gfx-cg-amdgpu.patch
+ BuildRequires:  %kernel_module_package_buildreqs
+ BuildRequires:  kernel-default-devel
+ # The amd/ tree is copied from the full source; -devel only has headers
+@@ -51,6 +53,8 @@
+ cp -a %{_prefix}/src/linux/drivers/gpu/drm/amd drivers/gpu/drm/
+ patch -p1 --fuzz=0 --no-backup-if-mismatch < %{SOURCE0}
+ grep -q 'bc250_cc_write_mode' drivers/gpu/drm/amd/amdgpu/gfx_v10_0.c
++patch -p1 --fuzz=0 --no-backup-if-mismatch < %{SOURCE4}
++grep -q 'bc250_cg' drivers/gpu/drm/amd/amdgpu/nv.c
+ cp %{SOURCE1} .
+ 
+ %build
+@@ -63,6 +67,7 @@
+ 	ko=obj/$flavor/drivers/gpu/drm/amd/amdgpu/amdgpu.ko
+ 	krel=$(cat %{_prefix}/src/linux-obj/%{_target_cpu}/$flavor/include/config/kernel.release)
+ 	/sbin/modinfo -F parm $ko | grep '^bc250_cc_write_mode:'
++	/sbin/modinfo -F parm $ko | grep '^bc250_cg:'
+ 	/sbin/modinfo -F vermagic $ko | grep "^$krel "
+ done
+ 

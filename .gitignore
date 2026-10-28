@@ -8,3 +8,7 @@ obs/*.log
 obs/upstream/
 # amd-s2idle reports: hold monitor EDID serials
 idle-report/
+
+# Test scratch and Python bytecode
+src/*/work/
+__pycache__/

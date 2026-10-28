@@ -1,0 +1,23 @@
+[Unit]
+Description=Set the BC-250 8-core mask (SMU message 0x98)
+Documentation=https://github.com/GabriWar/bc250-core-cu-unlock
+ConditionPathExists=/sys/bus/pci/devices/0000:00:00.0/config
+# The governor drives the same SMU mailbox; finish before it starts.
+# Ordering only, no Requires=: a refused or failed run shows in
+# systemctl --failed but must not stop the governor or the boot.
+Before=cyan-skillfish-governor-smu.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Sets the mask only; the cores appear after the next warm reboot.
+ExecStart=/usr/bin/bc250-8core-unlock boot
+# Runs only after boot exited 0 (mask reads 0xFF). After a cold boot it logs
+# a warning and writes /run/motd.d/bc250-8core-unlock when only the factory
+# 12 CPUs are online. "-": its exit status (2 = warm reboot pending, 3 = other
+# count) shows on the ExecStartPost line of systemctl status but does not fail
+# the unit; the board still works on 6 cores.
+ExecStartPost=-/usr/bin/bc250-8core-check
+
+[Install]
+WantedBy=multi-user.target

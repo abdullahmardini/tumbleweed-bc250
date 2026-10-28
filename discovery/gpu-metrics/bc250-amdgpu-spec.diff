@@ -1,0 +1,19 @@
+--- bc250-amdgpu.spec	2026-10-25 20:10:51.506855020 -0700
++++ bc250-amdgpu.spec	2026-10-28 00:06:47.417119149 -0700
+@@ -21,6 +21,7 @@
+ Source1:        bc250-40cu.conf
+ Source2:        %{name}-files
+ Source3:        %{name}-preamble
++Source4:        bc250-8core-telemetry.patch
+ BuildRequires:  %kernel_module_package_buildreqs
+ BuildRequires:  kernel-default-devel
+ # The amd/ tree is copied from the full source; -devel only has headers
+@@ -51,6 +52,8 @@
+ cp -a %{_prefix}/src/linux/drivers/gpu/drm/amd drivers/gpu/drm/
+ patch -p1 --fuzz=0 --no-backup-if-mismatch < %{SOURCE0}
+ grep -q 'bc250_cc_write_mode' drivers/gpu/drm/amd/amdgpu/gfx_v10_0.c
++patch -p1 --fuzz=0 --no-backup-if-mismatch < %{SOURCE4}
++grep -q 'SmuMetricsTable_hybrid_t' drivers/gpu/drm/amd/pm/swsmu/smu11/cyan_skillfish_ppt.c
+ cp %{SOURCE1} .
+ 
+ %build
