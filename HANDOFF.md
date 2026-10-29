@@ -113,16 +113,41 @@ Wall meter (user, 2026-10-28; 40 CU, 8 cores, governor 500-1850, 144 Hz VRR, des
 - Profile 2 under load: FurMark peak ~200 W vs ~250 W, no thermal throttling.
 - Profile 1 hung the board under Superposition (blank screen, no amdgpu error or MCE).
 - Earlier (2026-10-25): governor min 1000 → 500 MHz cut idle ~82 → ~67 W, no stutter; 100 MHz no better. 60 Hz vs 144 Hz ~2 W (VRR state during that test not recorded).
-- **Memory profile:** Queue 3 `0x1E`, profiles 1/2/3 ≈ 450/850/1750 MHz memory, memory controller and fabric. Set-only, no read-back. Cold boot restores 3. `pp_dpm_mclk`/`fclk`/`current_uclk` read 450 at profiles 3 and 2, 850 at 1: not the GDDR6 clock. clpeak at profile 2: 190 GB/s (448 theoretical at 1750). Tool: `discovery/memory-profile/memprofile-step2-static.sh set|soak|restore` (root copy `/usr/local/sbin/bc250-memprofile-step2`).
+- **Memory profile:** Queue 3 `0x1E`, profiles 1/2/3 ≈ 450/850/1750 MHz memory, memory controller and fabric. Set-only, no read-back. Cold boot restores 3. `pp_dpm_mclk`/`fclk`/`current_uclk` read 450 at profiles 3 and 2, 850 at 1: not the GDDR6 clock. clpeak at profile 2: 190 GB/s (448 theoretical at 1750). Tool: `discovery/memory-profile/memprofile-step2-static.sh set|soak|restore` (root copy `/usr/local/sbin/bc250-memprofile-step2`). BIOS source: ABL1 has the u16 table `1750,1330,1330,850,225,0,0,225` at `0x16a00` (P2=P3); APCB MEMG types 0x7/0x8 hold 1750, 450/850 absent from the APCB. 1750 is likely profile 3's GDDR6 clock (×8 = 14 Gbps); the 225 pair may underlie profile 1's ~450 (guess).
 - **No RAPL** (0 fixed counters, `/sys/class/powercap` empty). CPU rail power is `gpu_metrics` `average_soc_power` (0x2C, VDDCR_VDD); `average_gfx_power` (0x2E) is VDDCR_GFX. PPT (`power1_average`) is the whole APU.
 - **GPU clock gating is off by driver design:** `nv.c` sets `cg_flags = pg_flags = 0` for GC 10.1.3; AMD `bca52455a3c0`: "cyan skillfish doesn't support any CG features". GFXOFF is a no-op.
 - **SMU features (firmware 88.6.0):** Q0 `0x3D` ignores its argument, returns bits 0-31: `0xDD602C7D`. Off: GFXCLK_EFFT_FREQ, DS_LCLK, RM, DS_MP1CLK, DS_MP0CLK, MGCG, GFX_CKS, FP_THROTTLING, UMC_THROTTLE, DS_MP3CLK, DFLL_BTC_CALIBRATION (plus the four DS_* enabled at runtime above). v11.8 has no UCLK DPM and no DS_UCLK/DS_FCLK: nothing downclocks memory within a profile. Q2 `0x05` with the bit as argument enables a feature until power-off. Tool: `discovery/smu-features/smu-features.sh status | enable NAME q2|q3`. amdgpu never sends `0x3D` (fills ones).
 - **PCIe ASPM:** boot policy `default` keeps the BIOS's off state. `powersupersave` at runtime (not persistent): GPU L0s+L1, NVMe L1, NIC L0s. FADT and `_OSC` don't block ASPM. `r8169` disables NIC L1 for RTL8168h; `link/l1_aspm=1` works (no errors). NVMe trains at 5 GT/s x2; root port `00:15.0` has no L1SS capability, so `powersave` and `powersupersave` behave the same. Tool: `discovery/aspm/aspm-probe.sh`.
 - **VRR:** GNOME `refresh-rate-mode` `variable`, DP-1 `vrr_range` 48-144; idle desktop drops to the 48 Hz floor between flips (`amdgpu_refresh_rate_track`).
 
+## SMU mailbox
+
+Source read (kernel 7.3.0-1 tree, governor and community repos), not probed. `C2PMSG_n = 0x3B10900 + 4n`.
+
+| Queue | cmd | resp | arg |
+| --- | --- | --- | --- |
+| Q0 (driver) | `0x3B10A08` | `0x3B10A68` | `0x3B10A48` |
+| Q1 | `0x3B10A00` | `0x3B10A60` | `0x3B10A40` |
+| Q2 | `0x3B10528` | `0x3B10564` | `0x3B10998` |
+| Q3 (control) | `0x3B10A20` | `0x3B10A80` | `0x3B10A88` |
+| Q4 | `0x3B10A24` | `0x3B10A84` | `0x3B10A8C` |
+
+- Q3 arg2 == Q4 arg1 (`0x3B10A8C`). Userspace: `0xB8` addr / `0xBC` data on `00:00.0`; amdgpu drives Q0 by MMIO under its own lock. The governor flock is per 32-bit access, not per addr/data pair — userspace SMU tools can race each other and corrupt a message.
+- Resp codes: `01` OK, `00` busy/timeout, `FF` fail, `FE` unknown cmd, `FD` prereq, `FC` busy, `FB` debug end. An unknown resp sets `SMU_FW_HANG`; the driver then sends nothing.
+- **Q0** (IDs `0x01-0x3D`; kernel sends `01-07,0E,3B,3C`): getters `01` Test(n+1), `02` GetSmuVersion=`0x00580600`, `0C` core pstate, `37` GetGfxFreq MHz, `38` GetGfxVid, `3D` GetEnabledSmuFeatures (arg ignored). Setters `0E` RequestGfxclk, `39/3A` Force/Unforce GfxFreq, `3B/3C` Force/Unforce GfxVid (VID=(1550-mV)/6.25, clamp 700-1129 mV), `2C` SetCoreEnableMask, `35/36` soft min/max CPU clk, `2E` InitiateGcRsmuSoftReset (GPU reset, dangerous). Tables `04/05` DRAM addr, `06` copy metrics.
+- **Q3** (`0xA9`-entry handler table in SMU SRAM at `0x7464` → IDs `0x00-0xA8`): `1E` memory profile, `98` core mask, `0F/10` force/unforce VID, `25/26` OC clock, `36/37` CPU/GPU voltage, `50` VID curve scale, `8B/8C` max CPU/GPU temp, `8F` max CPU boost, `9A` disable extra voltage, `3C/3D` feature enable/disable. `28-2C` arbitrary SMN read/write, gated (`2A` returns `FD` while closed). `47/48` inert (`FE`).
+- **Q2**: `05/06` feature enable/disable (mask in arg; MGCG enable hung the SMU), `0A` transfer engine, `0D-10` table addrs, `23` ring-append exploit (VRAM-temp payload).
+- **Undocumented** (no kernel name, no repo wrapper): Q0 `08,09,10,12,15,1F-2B,2D,32,33`; ~60 Q3 IDs across `0x02-0xA6`. Q1/Q2/Q4 max ID unknown.
+- SMU firmware is **plaintext** in the BIOS at `0x8ff000` (`0x40200` B, v0.88.6.0, type `0x08`); type `0x12` at `0x93f700` is a signed stub. Disassembling the blob or dumping the Q3 handler table (needs the `0x28-0x2C` gate open) beats blind probing.
+
+## BIOS / SMU reverse engineering
+
+Moved to `bios_flashing/HANDOFF.md`; tooling is `bios_flashing/romtool.py` (uv project, `uv run romtool.py`). Headline: the AMD CBS power options (memory clock 450/850/1750, per-port ASPM L0s+L1, DF C-states, NBIO clock gating, SMU feature bits, fPPT/TDC) are all present in `CbsSetupDxe` and not exposed by the shipped menus; reachability needs an IFR walk before any menu patch.
+
 ## Suspend
 
 - `mem_sleep` offers only `[s2idle]`. DSDT (same on BIOS 1.00-5.00, lorek123 dump) has `_S0`, `_S4`, `_S5`, no `_S3`, no LPS0 device (`PNP0D80`).
+- BIOS dump (2026-10-28): UEFI carries the S3 path (S3Resume2Pei, BootScriptExecutor, PspS3Smm, SleepSmi) but no S0i3/LPS0 module and no PBS. No `_S3` or `PNP0D80` anywhere in either image, decompressed sections included. S3 is off by firmware policy (missing `_S3`), not missing resume code — an injected `_S3`/LPS0 via the initrd override is the lever, no flash. FADT built in code, flags `0x385A5`, `LOW_POWER_S0` clear.
 - s2idle resumed once (P2.00; that boot then died a minute later) and hung once (P3.00). Wake source unknown (`pm_debug_messages` was 0).
 - s2idle saves almost nothing: amdgpu logs `BIOS has not been configured for suspend-to-idle` (no FADT `LOW_POWER_S0`) and never suspends; no LPS0 device; `amd_pmc` does not match root complex `1022:13e0`; no AMD GPIO device, so `pinctrl_amd` is not loaded. `amd-s2idle` 0.2.22: "does not meet s2idle prerequisites" (report in `idle-report/`, not committed: holds monitor serials).
 - Wake-capable: power button, RTC, USB/PCIe GPEs. USB root hubs have `power/wakeup` disabled.
@@ -136,6 +161,7 @@ Wall meter (user, 2026-10-28; 40 CU, 8 cores, governor 500-1850, 144 Hz VRR, des
 ## Secure Boot
 
 - Firmware reports Secure Boot unsupported.
+- **Stack stripped from the BIOS**, not merely disabled: no SecureBootDxe, no PK/KEK/db/dbx defaults, no authenticated-variable store, no TPM/fTPM — confirmed in both the P2.00/P3.00 dumps and live (2026-10-28). Enabling it needs a BIOS that ships the modules; the initrd/MOK path cannot add them. Signing the KMPs matters only once such a BIOS exists.
 - Kernel has `CONFIG_LOCK_DOWN_IN_EFI_SECURE_BOOT=y`. Under Secure Boot, integrity lockdown blocks:
 
 | Piece | Blocked by |
@@ -156,7 +182,7 @@ Ask each maintainer about AI-assisted PRs before sending; keep that rule (the us
 | s2idle | SMU sleep-path handlers (S0i3 support unknown) | rw-r-r-0644 (read them while finding `0x98`) |
 | s2idle | ACPI fixes in the BIOS | Forbidden-Darkness (MeiMeiDXE-T-v2) |
 | Hibernate (fallback) | Bigger swap (us); 8 cores on cold boot needs MeiMeiDXE `Bc250CoreUnlockDxe` (rewrites the boot block, highest risk) | us; Forbidden-Darkness |
-| Secure Boot | Search the BIOS dumps for Secure Boot modules/variables: stripped or hidden? | us, `bios_flashing/`; clevocore (P5.00_clv, Discord) |
+| Secure Boot | P2/P3 dumps: stack stripped (no DXE, vars or TPM). Check whether other builds (P5.00_clv) ship it | us, `bios_flashing/`; clevocore (P5.00_clv, Discord) |
 | Secure Boot | ACPI fixes in the BIOS instead of the initrd override | Forbidden-Darkness |
 | Secure Boot | SMU access from a signed kernel module, not userspace | filippor/cyan-skillfish-governor |
 | Secure Boot | Sign the KMPs (OBS project key + MOK) | us, `home:superppl:bc250` |
@@ -170,7 +196,7 @@ Governor contribution candidates (filippor): D-Bus policy scoped to `com.cyanski
 - hwmon: `nct6686` (via `nct6683`), `amdgpu`, `k10temp` (Tctl only), `nvme`. `nct6686` channels are unlabeled; none is a 12 V input or current sense.
 - `nct6687`: fan2 is the cooler fan (Arctic P12, ~1960 rpm max). BIOS curve idle PWM 178 ≈ 1500 rpm; `pwm2_enable=2` returns to it. The `chip ID 0xffff` line is the empty `0x4e` probe.
 - **VRAM temperature** via pan-Rijovich (`discovery/vram-temp/vramtemp-pan-rijovich.sh`, governor stopped): 8 chips, idle 28-38 °C. Loads a payload into SMU RAM after a Queue 2 `0x23` exploit; undone by a power cycle; second read in the same power cycle needs `SKIP_PATCH=1`. Control Center is the only single-reader route (flock, 5 s governor rule). Hexxeh's DKMS bypasses the flock and needs an unlocked gate. Reads use the GDDR6 bus and can crash.
-- **8-core `gpu_metrics` layout is wrong on 7.3:** `current_gfxclk`, `pp_dpm_sclk`, hwmon `sclk` read 2-100 MHz; `temperature_core[0..3]` hold power. higorprado's `0001-bc250-8core-telemetry.patch` (GabriWar repo, no license header) fixes gfxclk; `average_*` stay wrong.
+- **8-core `gpu_metrics` layout is wrong on 7.3:** `current_gfxclk`, `pp_dpm_sclk`, hwmon `sclk` read 2-100 MHz; `temperature_core[0..3]` hold power. higorprado's `0001-bc250-8core-telemetry.patch` (GabriWar repo, no license header) fixes gfxclk; `average_*` stay wrong. 8-core repacks the first 0x46 bytes of the Current block: CoreFrequency[8], CorePower[7] at 0x10, CoreTemperature only cores 4-5 at 0x2C — so `temperature_core[0..3]` = core 6/7 power, `current_gfxclk` = core 6 C0 residency; cores 0-3/6/7 temps absent. Fields ≥0x46 unchanged. Real gfxclk: Q0 `0x37`.
 - **amdgpu sysfs reads message the SMU** on Q0 (`0x03B10A08`) outside the governor's control. The governor's bind-mounted `gpu_metrics` copy does not.
 - Board PMICs ISL69247/ISL95712/ISL99360 (mothenjoyer69 `hardware.md`). ISL69247 PMBus needs jumper wires from `I2C_HEADER1` to `TPMS1` pins 4/6 (onlinermm).
 
@@ -178,6 +204,9 @@ Governor contribution candidates (filippor): D-Bus policy scoped to `com.cyanski
 
 - systemd-boot (`sdbootutil`). Kernel `7.3.0-1-default`, LVM + btrfs, SELinux. CPU family 23 model 71; root complex `1022:13e0`; GPU `card1` (`1002:13fe`).
 - BIOS P3.00 Chipset Menu (flashed from P2.00, ranges in `bios_flashing/flash.layout`, readback matched). IOMMU off. 14 GiB RAM visible. No `fwupd` system firmware device.
+- P3.00 vs P2.00 dump diff: only ABL `33.17.9`→`33.17.38` (bodies changed in ABL2/ABL4) and one Setup ref repointed to CBS "NBIO Common"; no setting defaults or APCB values changed.
+- CPU microcode `0x08407007`; `ucode-amd-20260926` has no patch for CPUID `0x840F70`. AGESA `RBNBDK-BL5 46.1.2.220426` (community P5clv ROM; not exposed live).
+- PSP `01:00.2 [1022:143e]` has no driver and is disabled; amdgpu loads no PSP firmware (SOS/TA 0). MSR reads work (PSP base MSR `0xC00110A2` = `0xFDD00000`); PPIN read `#GP`. BIOS sets SME enable (SYSCFG bit 23) but kernel SME is off; SEV/SEV-ES disabled; SMM locked.
 - `CONFIG_ACPI_TABLE_UPGRADE=y`, debugfs mounted, `MODULE_SIG_FORCE` off, lockdown `none`.
 - `osc` installed and authenticated; local builds via `sudo /usr/bin/build` (`/etc/sudoers.d/osc-build`).
 - Test extras: `clpeak`, `Mesa-libRusticlOpenCL`, `libOpenCL1`, `libclc`; `/usr/local/sbin/bc250-memprofile-step2`. Logs `/var/log/bc250-vramtemp/`, `/var/log/bc250-memprofile-soak.log`.
@@ -223,7 +252,7 @@ Governor contribution candidates (filippor): D-Bus policy scoped to `com.cyanski
 - Fan curves: switch `bc250-setup` to `nct6687` and pick a curve tool (CoolerControl in OSS)?
 - `bc250-telemetry-log` (`src/bc250-telemetry-log/`, 32 tests): publish? Does the governor's bind mount reach its sandbox?
 - GFX CGCG opt-in patch (`discovery/clock-gating/`, never booted): low priority.
-- Do the BIOS dumps contain Secure Boot modules?
+- Name the undocumented SMU IDs: disassemble the plaintext SMU blob (BIOS `0x8ff000`) or dump the Q3 handler table at SMU SRAM `0x7464` (needs the `0x28-0x2C` gate open). Blind probing risks SMU hangs.
 
 ## Sources
 

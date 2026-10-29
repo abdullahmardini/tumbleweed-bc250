@@ -15,5 +15,5 @@ Tumbleweed is just my preferred distro, I don't want to relearn muscle memory. `
   - `gpu-metrics/`: `gpu_metrics` decoder, the 8-core telemetry patch and the spec diff to carry it
   - `clock-gating/`: opt-in `amdgpu.bc250_cg` patch, its check script and spec diff
   - `fan/`: nct6687 PWM test
-- `bios_flashing/`: BIOS notes and tools
+- `bios_flashing/`: full-chip dumps, `romtool.py` (uv project; `list`, `extract`, `grep`, `vars`, `diff`) and its own [README](bios_flashing/README.md) and [HANDOFF](bios_flashing/HANDOFF.md).
 - `HANDOFF.md`: current state and open questions

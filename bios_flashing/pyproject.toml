@@ -1,0 +1,14 @@
+[project]
+name = "bc250-bios-tools"
+version = "0.1.0"
+description = "Read-only parsers for the BC-250 SPI dumps"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.uv]
+# A single script, not an installable package: `uv run romtool.py ...`.
+package = false
+
+[tool.ruff]
+line-length = 100

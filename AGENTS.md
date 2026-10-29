@@ -33,4 +33,4 @@ Test success and failure paths. Verify with the commands in the handoff, not by 
 
 ## Documentation
 
-One README plus the handoff. No new markdown: no ADRs, no design docs, no changelog.
+One README plus the handoff per area that needs them (`bios_flashing/` has its own). Nothing else: no ADRs, no design docs, no changelog.

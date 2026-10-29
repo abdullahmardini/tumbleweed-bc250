@@ -12,3 +12,4 @@ idle-report/
 # Test scratch and Python bytecode
 src/*/work/
 __pycache__/
+.venv/
